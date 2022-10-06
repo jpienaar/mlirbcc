@@ -1,0 +1,8 @@
+build/
+# Skip docs in progress
+docs/_*.*
+.vscode/
+*.dSYM
+*.dSYM
+.DS_Store
+a.out
