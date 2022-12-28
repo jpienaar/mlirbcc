@@ -15,6 +15,8 @@
 // before you include this file in one C or C++ file to create the
 // implementation.
 
+// This file should be included before all dialect parsing extensions.
+
 // Convention followed in this file is to prefix implementation details with
 // mbci_.
 
@@ -119,10 +121,10 @@ MlirBytecodeStatus parseMlirFile(MlirBytecodeBytesRef bytes, void *callerState,
                                  MlirBytecodeResourceCallBack resourceFn,
                                  MlirBytecodeStringCallBack stringFn);
 
-// Parses attributes and types, calling MlirBytecodeAttrCallBack and
+// Iterators over attributes and types, calling MlirBytecodeAttrCallBack and
 // MlirBytecodeTypeCallBack upon encountering Attribute or Type respectively.
 // Returns whether failed.
-MlirBytecodeStatus mlirBytecodeParseAttributesAndTypes(
+MlirBytecodeStatus mlirBytecodeForEachAttributeAndType(
     MlirBytecodeFile *mlirFile, void *callerState,
     MlirBytecodeAttrCallBack attrFn, MlirBytecodeTypeCallBack typeFn);
 
@@ -676,7 +678,7 @@ mlirBytecodeParseDialectSection(MlirBytecodeFile *mlirFile, void *callerState,
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeParseAttributesAndTypes(
+MlirBytecodeStatus mlirBytecodeForEachAttributeAndType(
     MlirBytecodeFile *mlirFile, void *callerState,
     MlirBytecodeAttrCallBack attrFn, MlirBytecodeTypeCallBack typeFn) {
   const MlirBytecodeBytesRef offsetSection =
@@ -720,11 +722,18 @@ MlirBytecodeStatus mlirBytecodeParseAttributesAndTypes(
       }
 
       // Parse & associate dialect.attr[j] with `attr`
-      if (mlirBytecodeFailed(attrFn(callerState,
-                                    (MlirBytecodeDialectHandle){.id = dialect},
-                                    (MlirBytecodeAttrHandle){.id = i++},
-                                    numAttrs, hasCustomEncoding, attr)))
+      MlirBytecodeStatus ret =
+          attrFn(callerState, (MlirBytecodeDialectHandle){.id = dialect},
+                 (MlirBytecodeAttrHandle){.id = i++}, numAttrs,
+                 hasCustomEncoding, attr);
+      if (mlirBytecodeFailed(ret))
+        // TODO: Should we rely that instantiators will always do this? Perhaps
+        // only emit debug information here?
         return mlirBytecodeEmitError("attr callback failed");
+      if (mlirBytecodeInterupted(ret))
+        break;
+      // Unhandled attributes are not considered error.
+
       if (mlirBytecodeFailed(skipBytes(&atPP, length)))
         return mlirBytecodeEmitError("invalid attr offset");
     }
@@ -755,11 +764,18 @@ MlirBytecodeStatus mlirBytecodeParseAttributesAndTypes(
         return mlirBytecodeEmitError(
             "Attribute or Type entry offset points past the end of section");
       }
-      if (mlirBytecodeFailed(typeFn(callerState,
-                                    (MlirBytecodeDialectHandle){.id = dialect},
-                                    (MlirBytecodeTypeHandle){.id = i++},
-                                    numTypes, hasCustomEncoding, type)))
+
+      MlirBytecodeStatus ret =
+          typeFn(callerState, (MlirBytecodeDialectHandle){.id = dialect},
+                 (MlirBytecodeTypeHandle){.id = i++}, numTypes,
+                 hasCustomEncoding, type);
+      if (mlirBytecodeFailed(ret))
+        // TODO: Same question as with attributes.
         return mlirBytecodeEmitError("type callback failed");
+      if (mlirBytecodeInterupted(ret))
+        break;
+      // Unhandled attributes are not considered error.
+
       if (mlirBytecodeFailed(skipBytes(&atPP, offset)))
         return mlirBytecodeEmitError("invalid type offset");
     }
@@ -1171,7 +1187,7 @@ MlirBytecodeStatus parseMlirFile(MlirBytecodeBytesRef bytes, void *callerState,
       mlirBytecodeFailed(mlirBytecodeParseResourceSection(
           &mlirFile, callerState, resourceFn)) ||
       // Process the attribute and type section.
-      mlirBytecodeFailed(mlirBytecodeParseAttributesAndTypes(
+      mlirBytecodeFailed(mlirBytecodeForEachAttributeAndType(
           &mlirFile, callerState, attrFn, typeFn)) ||
       // Finally, process the IR section.
       mlirBytecodeFailed(mlirBytecodeParseIRSection(&mlirFile, callerState)))

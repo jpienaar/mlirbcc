@@ -46,15 +46,14 @@ This project is under active development/being bootstrapped.
 
 #### Considerations during
 
-1. Externalize all state to caller. The parsers themselves should be stateless and up to instantiator to manage any caching etc deemed useful for the given application.
+1. Externalize all state to caller. The parsers themselves should be stateless
+and up to instantiator to manage any caching etc deemed useful for the given
+application.
 
 2. Keep allocations inside parser to minimal/let instantiation dictate allocating.
 
-   Note: Some allocations can only be avoided by doing additional work or by restricting the spectrum of MLIR files that can be consumed.
-
-3. Prefer static linking rather than function pointers.
-
-  This is not a general MLIR utility, so for example, the IR parsing is simply fixed functions rather than configurable per iteration of IR section. One can still do different dispatches based around the user state threaded through.
+   Note: Some allocations can only be avoided by doing additional work or by
+   restricting the spectrum of MLIR files that can be consumed.
 
 ### Compilation
 
@@ -64,13 +63,21 @@ Build and testing with:
 cmake -B build && cmake --build build && ./build/examples/Printer/MlirBytecodePrintParse testdata/general.mlirbc
 ```
 
+Note: building for size constrained one probably wants to set MinSizeRel at
+least, enable LTO and disable verbose error reporting and debugging. The optimal
+compiler settings have not been explored.
+
 ### Structure
 
 - `BytecodeParse.h` is the bytecode parsers;
-  Define MLIR_BYTECODE_PARSE_IMPL before including it to instantiate implementation;
+  Define MLIR_BYTECODE_PARSE_IMPL before including it to instantiate
+  implementation;
 - `{Dialect}Parse.h` are the `Dialect`'s attribute & type parsers;
-  Define MLIR_BYTECODE_PARSE_IMPL or MLIR_BYTECODE_{DIALECT}_PARSE_IMPL before including it to instantiate implementation;
+  Define MLIR_BYTECODE_PARSE_IMPL or MLIR_BYTECODE_{DIALECT}_PARSE_IMPL before
+  including it to instantiate implementation;
 - `examples/Printer/PrintParse.c` is an example instantiation that simply prints out the IR;
+- tblgen/
+  Helpers to bootstrap dialect parser specification.
 
 ### TODO
 

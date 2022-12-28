@@ -644,7 +644,7 @@ int main(int argc, char **argv) {
   }
 
   fprintf(stderr, "Parsing attributes & types\n");
-  if (mlirBytecodeFailed(mlirBytecodeParseAttributesAndTypes(
+  if (mlirBytecodeFailed(mlirBytecodeForEachAttributeAndType(
           refFile, NULL, &printAttrDialect, &printTypeDialect))) {
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse attr/type"), 1;
   }
@@ -653,7 +653,7 @@ int main(int argc, char **argv) {
   // fixed point.
   fprintf(stderr, "Re-parsing attributes & types\n");
   for (int i = 0; i < 3; ++i) {
-    if (mlirBytecodeFailed(mlirBytecodeParseAttributesAndTypes(
+    if (mlirBytecodeFailed(mlirBytecodeForEachAttributeAndType(
             refFile, NULL, &printAttrDialect, &printTypeDialect))) {
       return mlirBytecodeEmitError("MlirBytecodeFailed to parse attr/type"), 1;
     }
