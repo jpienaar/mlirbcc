@@ -18,7 +18,7 @@ if(MLIRBC_DEBUG)
     message(STATUS "Building with debugging messages on")
     add_definitions(-DMLIRBC_DEBUG)
 endif(MLIRBC_DEBUG)
-option(MLIR_DIR "MLIR install dir" PATH)
+set(MLIR_DIR "" CACHE PATH "MLIR install dir.")
 set(LLVM_USE_SANITIZER "" CACHE STRING
     "Define the sanitizer used to build binaries and tests.")
 

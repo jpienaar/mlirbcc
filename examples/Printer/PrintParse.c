@@ -68,8 +68,7 @@ int depth;
 
 static MlirMutableBytesRef getAttribute(MlirBytecodeAttrHandle attr) {
   static char empty[] = "<<unknown >>";
-  if (attr.id != kMlirBytecodeHandleSentinel && attributes &&
-      attributes[attr.id].length)
+  if (!mlirBytecodeIsSentinel(attr) && attributes && attributes[attr.id].length)
     return attributes[attr.id];
   mlirBytecodeEmitDebug("unknown attribute %d", (int)attr.id);
   return (MlirMutableBytesRef){.data = (uint8_t *)&empty[0],
@@ -78,7 +77,7 @@ static MlirMutableBytesRef getAttribute(MlirBytecodeAttrHandle attr) {
 
 static MlirMutableBytesRef getType(MlirBytecodeTypeHandle type) {
   static char empty[] = "<<unknown>>";
-  if (type.id != kMlirBytecodeHandleSentinel && types && types[type.id].length)
+  if (types && types[type.id].length)
     return types[type.id];
   return (MlirMutableBytesRef){.data = (uint8_t *)&empty[0],
                                .length = sizeof(empty)};
@@ -350,8 +349,7 @@ printUnknownAttrs(void *state, MlirBytecodeDialectHandle dialectHandle,
     memset(attributes, 0, total * sizeof(*attributes));
   }
 
-  if (attrHandle.id != kMlirBytecodeHandleSentinel &&
-      attributes[attrHandle.id].length) {
+  if (!mlirBytecodeIsSentinel(attrHandle) && attributes[attrHandle.id].length) {
     return mlirBytecodeSuccess();
   }
 
@@ -388,8 +386,7 @@ printUnknownTypeDialect(void *state, MlirBytecodeDialectHandle dialectHandle,
     memset(types, 0, total * sizeof(*types));
   }
 
-  if (typeHandle.id != kMlirBytecodeHandleSentinel &&
-      types[typeHandle.id].length) {
+  if (types[typeHandle.id].length) {
     return mlirBytecodeSuccess();
   }
 
@@ -543,7 +540,7 @@ MlirBytecodeStatus mlirBytecodeOperation(void *state, MlirBytecodeOpHandle name,
   printf("%.*s.%.*s", (int)dialectName.length, dialectName.data,
          (int)opName.length, opName.data);
 
-  if (attrDict.id != kMlirBytecodeHandleSentinel) {
+  if (!mlirBytecodeIsSentinel(attrDict)) {
     MlirMutableBytesRef attrDictVal = getAttribute(attrDict);
     printf(" %.*s ", (int)attrDictVal.length, attrDictVal.data);
   }

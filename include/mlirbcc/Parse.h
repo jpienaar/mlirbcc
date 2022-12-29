@@ -194,6 +194,9 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeParseFile(
 /// Returns whether the given MlirBytecodeFile structure is empty.
 MLIRBC_DEF bool mlirBytecodeFileEmpty(MlirBytecodeFile *file);
 
+/// Returns whether the given attribute is the sentinel value.
+MLIRBC_DEF bool mlirBytecodeIsSentinel(MlirBytecodeAttrHandle attr);
+
 //===----------------------------------------------------------------------===//
 // Dialect parsing utility methods.
 // Note: These should probably go into their own header.
@@ -665,7 +668,6 @@ mlirBytecodeParseDialectSection(void *callerState, MlirBytecodeFile *mlirFile,
       return mlirBytecodeFailure();
   }
 
-  uint64_t index = 0;
   while (!mbci_streamEmpty(&pp)) {
     uint64_t dialect, numOpNames;
     mbci_parseVarInt(&pp, &dialect);
@@ -897,6 +899,10 @@ mlirBytecodeForEachResource(void *callerState, MlirBytecodeFile *const mlirFile,
     }
   }
   return mlirBytecodeSuccess();
+}
+
+bool mlirBytecodeIsSentinel(MlirBytecodeAttrHandle attr) {
+  return attr.id == (uint64_t)kMlirBytecodeHandleSentinel;
 }
 
 struct mbci_MlirIRSectionStack {
@@ -1283,8 +1289,8 @@ mlirBytecodeGetOpName(void *callerState, const MlirBytecodeFile *mlirFile,
       mbci_getSection(mlirFile, mbci_kDialect);
   MlirBytecodeStream pp = mbci_populateParserPosForSection(dialectSection);
 
-  MlirBytecodeOpRef ret = {.dialect = -1, .op = -1};
-  uint64_t numDialects, t;
+  MlirBytecodeOpRef ret = {.dialect = {-1}, .op = {-1}};
+  uint64_t numDialects;
   if (mlirBytecodeFailed(mbci_parseVarInt(&pp, &numDialects)))
     return mlirBytecodeEmitError("unable to parse number of dialects"), ret;
 

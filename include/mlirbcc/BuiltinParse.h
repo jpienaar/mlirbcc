@@ -21,10 +21,6 @@
 extern "C" {
 #endif
 
-#include "mlirbcc/BytecodeTypes.h"
-#include "mlirbcc/Log.h"
-#include "mlirbcc/Status.h"
-#include <stdbool.h>
 
 // Entry point for Builtin dialect Attribute parsing.
 MlirBytecodeStatus
