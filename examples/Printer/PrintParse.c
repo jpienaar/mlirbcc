@@ -62,7 +62,7 @@ static MlirMutableBytesRef getAttribute(MlirBytecodeAttrHandle attr) {
   if (attr.id != kMlirBytecodeHandleSentinel && attributes &&
       attributes[attr.id].length)
     return attributes[attr.id];
-  mlirBytecodeEmitDebug("unknown attribute %d", (int)attr);
+  mlirBytecodeEmitDebug("unknown attribute %d", (int)attr.id);
   return (MlirMutableBytesRef){.data = (uint8_t *)&empty[0],
                                .length = sizeof(empty)};
 }
@@ -399,12 +399,12 @@ printTypeDialect(void *state, MlirBytecodeDialectHandle dialectHandle,
 
 MlirBytecodeStatus printOpDialect(void *state,
                                   MlirBytecodeDialectHandle dialectHandle,
-                                  MlirBytecodeOpHandle opHdl, size_t total,
+                                  MlirBytecodeOpHandle opHdl,
                                   MlirBytecodeStringHandle stringHdl) {
   (void)state;
 
-  mlirBytecodeEmitDebug("\t\tdialect[%d] :: op[%d/%d] = %d\n",
-                        (int)dialectHandle.id, (int)opHdl.id, (int)total,
+  mlirBytecodeEmitDebug("\t\tdialect[%d] :: op[%d] = %d\n",
+                        (int)dialectHandle.id, (int)opHdl.id,
                         (int)stringHdl.id);
   return mlirBytecodeSuccess();
 }
@@ -497,7 +497,7 @@ MlirBytecodeStatus mlirBytecodeOperation(void *state, MlirBytecodeOpHandle name,
                                          MlirBytecodeStream *succcessors,
                                          bool isIsolatedFromAbove,
                                          size_t numRegions) {
-  MlirBytecodeOpRef opRef = mlirBytecodeGetInstructionString(refFile, name);
+  MlirBytecodeOpRef opRef = mlirBytecodeGetOpName(refFile, name);
   MlirBytecodeBytesRef opName =
       mlirBytecodeGetStringSectionValue(refFile, opRef.op);
   MlirBytecodeBytesRef dialectName =
@@ -660,8 +660,8 @@ int main(int argc, char **argv) {
   }
 
   fprintf(stderr, "Parsing resources\n");
-  if (mlirBytecodeFailed(mlirBytecodeParseResourceSection(
-          refFile, NULL, &printResourceDialect))) {
+  if (mlirBytecodeFailed(
+          mlirBytecodeForEachResource(refFile, NULL, &printResourceDialect))) {
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse resouces"), 1;
   }
 

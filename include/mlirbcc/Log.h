@@ -18,22 +18,21 @@
 extern MlirBytecodeStatus mlirBytecodeEmitErrorImpl(const char *fmt, ...);
 
 /// Helper function to emit debugging info.
-extern void mlirBytecodeEmitDebugImpl(const char *fmt, ...);
+extern void mlirBytecodeEmitDebugImpl(const char *file, int line,
+                                      const char *fmt, ...);
 
 // Macros to allow capturing file and line from which invoked.
 #ifdef MLIRBC_DEBUG
-#define mlirBytecodeEmitDebug(fmt, ...)                                        \
-  mlirBytecodeEmitDebugImpl(state, "%s:%d " fmt, __FILE__, __LINE__,           \
-                            __VA_ARGS__)
+#define mlirBytecodeEmitDebug(...)                                             \
+  mlirBytecodeEmitDebugImpl(__FILE__, __LINE__, __VA_ARGS__)
 #else
 #define mlirBytecodeEmitDebug(...)                                             \
   while (0)                                                                    \
     ;
 #endif
 
-#ifdef MLIRBC_VERBOSE_ERRORS
-#define mlirBytecodeEmitError(fmt, ...)                                        \
-  mlirBytecodeEmitErrorImpl(fmt, __VA_ARGS__)
+#ifdef MLIRBC_VERBOSE_ERROR
+#define mlirBytecodeEmitError(...) mlirBytecodeEmitErrorImpl(__VA_ARGS__)
 #else
 #define mlirBytecodeEmitError(...) mlirBytecodeFailure()
 #endif
