@@ -689,7 +689,10 @@ int main(int argc, char **argv) {
 
   fprintf(stderr, "Parsing IR\n");
   indentSize = 0;
-  if (mlirBytecodeFailed(mlirBytecodeParseIRSection(NULL, refFile))) {
+  if (mlirBytecodeFailed(mlirBytecodeParseIRSection(
+          NULL, refFile, &mlirBytecodeOperation, &mlirBytecodeRegionEnter,
+          &mlirBytecodeBlockEnter, &mlirBytecodeBlockExit,
+          &mlirBytecodeRegionExit, &mlirBytecodeIsolatedOperationExit))) {
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse IR"), 1;
   }
 
