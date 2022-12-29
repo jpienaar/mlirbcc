@@ -122,7 +122,7 @@ mlirBytecodeCreateBuiltinStrAttr(void *state, MlirBytecodeAttrHandle attrHandle,
                                  MlirBytecodeStringHandle strHdl) {
   (void)state;
 
-  MlirBytecodeBytesRef str = mlirBytecodeGetStringSectionValue(refFile, strHdl);
+  MlirBytecodeBytesRef str = mlirBytecodeGetStringSectionValue(state, refFile, strHdl);
   int len = str.length + 3;
   attributes[attrHandle.id].data = (uint8_t *)malloc(len);
   attributes[attrHandle.id].length =
@@ -141,7 +141,7 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttrWithType(
   MlirMutableBytesRef typeStr = getType(type);
   if (typeStr.data == 0)
     return mlirBytecodeFailure();
-  MlirBytecodeBytesRef str = mlirBytecodeGetStringSectionValue(refFile, value);
+  MlirBytecodeBytesRef str = mlirBytecodeGetStringSectionValue(bcUserState, refFile, value);
   int len = str.length + 30;
   attributes[bcAttrHandle.id].data = (uint8_t *)malloc(len);
   attributes[bcAttrHandle.id].length =
@@ -414,7 +414,7 @@ MlirBytecodeStatus printDialect(void *state,
                                 size_t total,
                                 MlirBytecodeStringHandle stringHdl) {
   MlirBytecodeBytesRef dialect =
-      mlirBytecodeGetStringSectionValue(refFile, stringHdl);
+      mlirBytecodeGetStringSectionValue(state, refFile, stringHdl);
   mlirBytecodeEmitDebug("\t\tdialect[%d/%d] = %s\n", (int)dialectHandle.id,
                         (int)total, dialect.data);
   if (dialectHandle.id < MAX_DIALECTS) {
@@ -494,14 +494,14 @@ MlirBytecodeStatus mlirBytecodeOperation(void *state, MlirBytecodeOpHandle name,
                                          MlirBytecodeAttrHandle attrDict,
                                          MlirBytecodeStream *resultTypes,
                                          MlirBytecodeStream *operands,
-                                         MlirBytecodeStream *succcessors,
+                                         MlirBytecodeStream *successors,
                                          bool isIsolatedFromAbove,
                                          size_t numRegions) {
-  MlirBytecodeOpRef opRef = mlirBytecodeGetOpName(refFile, name);
+  MlirBytecodeOpRef opRef = mlirBytecodeGetOpName(state, refFile, name);
   MlirBytecodeBytesRef opName =
-      mlirBytecodeGetStringSectionValue(refFile, opRef.op);
+      mlirBytecodeGetStringSectionValue(state, refFile, opRef.op);
   MlirBytecodeBytesRef dialectName =
-      mlirBytecodeGetStringSectionValue(refFile, opRef.dialect);
+      mlirBytecodeGetStringSectionValue(state, refFile, opRef.dialect);
 
   bool first = true;
   printf("%*c", indentSize, ' ');
@@ -571,21 +571,21 @@ MlirBytecodeStatus printResourceDialect(
   switch (kind) {
   case kMlirBytecodeResourceEntryBlob:
     printf("\t\tblob size(resource %s.%s) = %ld\n",
-           mlirBytecodeGetStringSectionValue(refFile, groupKey).data,
-           mlirBytecodeGetStringSectionValue(refFile, resourceKey).data,
+           mlirBytecodeGetStringSectionValue(state, refFile, groupKey).data,
+           mlirBytecodeGetStringSectionValue(state, refFile, resourceKey).data,
            blob->length);
     break;
   case kMlirBytecodeResourceEntryBool:
     printf("\t\tbool resource %s.%s = %d\n",
-           mlirBytecodeGetStringSectionValue(refFile, groupKey).data,
-           mlirBytecodeGetStringSectionValue(refFile, resourceKey).data,
+           mlirBytecodeGetStringSectionValue(state, refFile, groupKey).data,
+           mlirBytecodeGetStringSectionValue(state, refFile, resourceKey).data,
            *boolResource);
     break;
   case kMlirBytecodeResourceEntryString:
     printf("\t\tstring resource %s.%s = %s\n",
-           mlirBytecodeGetStringSectionValue(refFile, groupKey).data,
-           mlirBytecodeGetStringSectionValue(refFile, resourceKey).data,
-           mlirBytecodeGetStringSectionValue(refFile, *strHandle).data);
+           mlirBytecodeGetStringSectionValue(state, refFile, groupKey).data,
+           mlirBytecodeGetStringSectionValue(state, refFile, resourceKey).data,
+           mlirBytecodeGetStringSectionValue(state, refFile, *strHandle).data);
     break;
   }
 
@@ -639,13 +639,13 @@ int main(int argc, char **argv) {
 
   fprintf(stderr, "Parsing dialects\n");
   if (mlirBytecodeFailed(mlirBytecodeParseDialectSection(
-          refFile, NULL, &printDialect, &printOpDialect))) {
+          NULL, refFile, &printDialect, &printOpDialect))) {
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse dialects"), 1;
   }
 
   fprintf(stderr, "Parsing attributes & types\n");
   if (mlirBytecodeFailed(mlirBytecodeForEachAttributeAndType(
-          refFile, NULL, &printAttrDialect, &printTypeDialect))) {
+          NULL, refFile, &printAttrDialect, &printTypeDialect))) {
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse attr/type"), 1;
   }
 
@@ -654,33 +654,33 @@ int main(int argc, char **argv) {
   fprintf(stderr, "Re-parsing attributes & types\n");
   for (int i = 0; i < 3; ++i) {
     if (mlirBytecodeFailed(mlirBytecodeForEachAttributeAndType(
-            refFile, NULL, &printAttrDialect, &printTypeDialect))) {
+            NULL, refFile, &printAttrDialect, &printTypeDialect))) {
       return mlirBytecodeEmitError("MlirBytecodeFailed to parse attr/type"), 1;
     }
   }
 
   fprintf(stderr, "Parsing resources\n");
   if (mlirBytecodeFailed(
-          mlirBytecodeForEachResource(refFile, NULL, &printResourceDialect))) {
-    return mlirBytecodeEmitError("MlirBytecodeFailed to parse resouces"), 1;
+          mlirBytecodeForEachResource(NULL, refFile, &printResourceDialect))) {
+    return mlirBytecodeEmitError("MlirBytecodeFailed to parse resources"), 1;
   }
 
   fprintf(stderr, "Parsing IR\n");
   indentSize = 0;
-  if (mlirBytecodeFailed(mlirBytecodeParseIRSection(refFile, NULL))) {
+  if (mlirBytecodeFailed(mlirBytecodeParseIRSection(NULL, refFile))) {
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse IR"), 1;
   }
 
   printf("\n-------\n");
 
 #if 0
-  if (mlirBytecodeFailed(parseMlirFile(
+  if (mlirBytecodeFailed(mlirBytecodeParseFile(
           ref, NULL, &printAttrDialect, &printTypeDialect, &printDialect,
           &printOpDialect, &blockEnterFn, &blockExitFn, &opFn, &opExitFn,
           &regionEnterFn, &regionExitFn, &printResourceDialect, &printStrings)))
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse file"), 1;
 
-  if (mlirBytecodeFailed(parseMlirFile(
+  if (mlirBytecodeFailed(mlirBytecodeParseFile(
           ref, NULL, &printAttrDialect, &printTypeDialect, &printDialect,
           &printOpDialect, &blockEnterFn, &blockExitFn, &opFn, &opExitFn,
           &regionEnterFn, &regionExitFn, &printResourceDialect, &printStrings)))

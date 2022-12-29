@@ -47,7 +47,7 @@ This project is under active development/being bootstrapped.
 #### Considerations during
 
 1. Externalize all state to caller. The parsers themselves should be stateless
-and up to instantiator to manage any caching etc deemed useful for the given
+and up to instantiation to manage any caching etc deemed useful for the given
 application.
 
 2. Keep allocations inside parser to minimal/let instantiation dictate allocating.

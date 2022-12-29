@@ -49,7 +49,7 @@ inline static MlirBytecodeStatus mlirBytecodeUnhandled() {
 }
 
 /// Creates a status representing an interrupted iteration.
-inline static MlirBytecodeStatus mlirBytecodeIterationInterupt() {
+inline static MlirBytecodeStatus mlirBytecodeIterationInterrupt() {
   MlirBytecodeStatus res = {3};
   return res;
 }
@@ -65,8 +65,8 @@ inline static bool mlirBytecodeFailed(MlirBytecodeStatus res) {
 }
 
 /// Checks if the given status represents a failure.
-inline static bool mlirBytecodeInterupted(MlirBytecodeStatus res) {
-  return res.value == mlirBytecodeIterationInterupt().value;
+inline static bool mlirBytecodeInterrupted(MlirBytecodeStatus res) {
+  return res.value == mlirBytecodeIterationInterrupt().value;
 }
 
 /// Checks if the given status represents a handled state.
