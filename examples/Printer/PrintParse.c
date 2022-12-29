@@ -1,4 +1,13 @@
-
+//===-- PrintParse.c - Parser instantiation that just prints --------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM
+// Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+// Example parser instantiation that just prints IR.
+//===----------------------------------------------------------------------===//
 
 #include <assert.h>
 #include <fcntl.h>
@@ -122,7 +131,8 @@ mlirBytecodeCreateBuiltinStrAttr(void *state, MlirBytecodeAttrHandle attrHandle,
                                  MlirBytecodeStringHandle strHdl) {
   (void)state;
 
-  MlirBytecodeBytesRef str = mlirBytecodeGetStringSectionValue(state, refFile, strHdl);
+  MlirBytecodeBytesRef str =
+      mlirBytecodeGetStringSectionValue(state, refFile, strHdl);
   int len = str.length + 3;
   attributes[attrHandle.id].data = (uint8_t *)malloc(len);
   attributes[attrHandle.id].length =
@@ -141,7 +151,8 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttrWithType(
   MlirMutableBytesRef typeStr = getType(type);
   if (typeStr.data == 0)
     return mlirBytecodeFailure();
-  MlirBytecodeBytesRef str = mlirBytecodeGetStringSectionValue(bcUserState, refFile, value);
+  MlirBytecodeBytesRef str =
+      mlirBytecodeGetStringSectionValue(bcUserState, refFile, value);
   int len = str.length + 30;
   attributes[bcAttrHandle.id].data = (uint8_t *)malloc(len);
   attributes[bcAttrHandle.id].length =
@@ -329,14 +340,19 @@ MlirBytecodeStatus mlirBytecodeQueryBuiltinIntegerTypeWidth(
 // ----
 
 static MlirBytecodeStatus
-printAttrDialect(void *state, MlirBytecodeDialectHandle dialectHandle,
-                 MlirBytecodeAttrHandle attrHandle, size_t total,
-                 bool hasCustom, MlirBytecodeBytesRef str) {
+printUnknownAttrs(void *state, MlirBytecodeDialectHandle dialectHandle,
+                  MlirBytecodeAttrHandle attrHandle, size_t total,
+                  bool hasCustom, MlirBytecodeBytesRef str) {
   (void)state;
   // Note: this currently assumes that number of attributes don't change.
   if (!attributes) {
     attributes = (MlirMutableBytesRef *)malloc(total * sizeof(*attributes));
     memset(attributes, 0, total * sizeof(*attributes));
+  }
+
+  if (attrHandle.id != kMlirBytecodeHandleSentinel &&
+      attributes[attrHandle.id].length) {
+    return mlirBytecodeSuccess();
   }
 
   mlirBytecodeEmitDebug("\t\tdialect[%" PRIu64 "] :: attr[%d/%d] ",
@@ -363,13 +379,18 @@ printAttrDialect(void *state, MlirBytecodeDialectHandle dialectHandle,
 }
 
 static MlirBytecodeStatus
-printTypeDialect(void *state, MlirBytecodeDialectHandle dialectHandle,
-                 MlirBytecodeTypeHandle typeHandle, size_t total,
-                 bool hasCustom, MlirBytecodeBytesRef str) {
+printUnknownTypeDialect(void *state, MlirBytecodeDialectHandle dialectHandle,
+                        MlirBytecodeTypeHandle typeHandle, size_t total,
+                        bool hasCustom, MlirBytecodeBytesRef str) {
   (void)state;
   if (!types) {
     types = (MlirMutableBytesRef *)malloc(total * sizeof(*types));
     memset(types, 0, total * sizeof(*types));
+  }
+
+  if (typeHandle.id != kMlirBytecodeHandleSentinel &&
+      types[typeHandle.id].length) {
+    return mlirBytecodeSuccess();
   }
 
   mlirBytecodeEmitDebug("\t\tdialect[%d] :: type[%d/%d] ",
@@ -645,7 +666,7 @@ int main(int argc, char **argv) {
 
   fprintf(stderr, "Parsing attributes & types\n");
   if (mlirBytecodeFailed(mlirBytecodeForEachAttributeAndType(
-          NULL, refFile, &printAttrDialect, &printTypeDialect))) {
+          NULL, refFile, &printUnknownAttrs, &printUnknownTypeDialect))) {
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse attr/type"), 1;
   }
 
@@ -653,8 +674,9 @@ int main(int argc, char **argv) {
   // fixed point.
   fprintf(stderr, "Re-parsing attributes & types\n");
   for (int i = 0; i < 3; ++i) {
+    fprintf(stderr, "\tparse %d:\n", i);
     if (mlirBytecodeFailed(mlirBytecodeForEachAttributeAndType(
-            NULL, refFile, &printAttrDialect, &printTypeDialect))) {
+            NULL, refFile, &printUnknownAttrs, &printUnknownTypeDialect))) {
       return mlirBytecodeEmitError("MlirBytecodeFailed to parse attr/type"), 1;
     }
   }
@@ -675,13 +697,13 @@ int main(int argc, char **argv) {
 
 #if 0
   if (mlirBytecodeFailed(mlirBytecodeParseFile(
-          ref, NULL, &printAttrDialect, &printTypeDialect, &printDialect,
+          ref, NULL, &printUnknownAttrs, &printUnknownTypeDialect, &printDialect,
           &printOpDialect, &blockEnterFn, &blockExitFn, &opFn, &opExitFn,
           &regionEnterFn, &regionExitFn, &printResourceDialect, &printStrings)))
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse file"), 1;
 
   if (mlirBytecodeFailed(mlirBytecodeParseFile(
-          ref, NULL, &printAttrDialect, &printTypeDialect, &printDialect,
+          ref, NULL, &printUnknownAttrs, &printUnknownTypeDialect, &printDialect,
           &printOpDialect, &blockEnterFn, &blockExitFn, &opFn, &opExitFn,
           &regionEnterFn, &regionExitFn, &printResourceDialect, &printStrings)))
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse file"), 1;

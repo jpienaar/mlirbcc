@@ -12,17 +12,16 @@
 // This file contains the full implementation for an event-based MLIR bytecode
 // parser. It is defined as a pure header-based implementation. To use:
 //
-//   #include "header_with_types_needed_for_parse.h"
-//   // The following needs to be defined before the first include
-//   //  - Types
-//   //      MlirBytecodeOperationState
-//   //  - Functions
-//   //
 //   #define MLIRBC_PARSE_IMPLEMENTATION
 //   #include "mlirbcc/Parse.h"
 //   // Include dialect specific parsing extensions with required types.
 //   #include "mlirbcc/BuiltinParse.h"
-//   // Define functions required by Parse.h and BuiltinParse.h.
+//
+// Define types and functions required for parsing (see below).
+//
+// Callbacks/functions to be implemented in instantiation accept an opaque
+// pointer as first argument that gets directly propagated during parsing and
+// can be used by instantiation for additional/parse local state capture.
 //
 // Note: only set implementation define before you include this file in one C or
 // C++ file.
@@ -42,28 +41,55 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Indicates functions users
 #define MLIRBC_DEF extern
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/// Populates the MlirBytecodeFile contents for given in memory bytes.
-/// Returns an empty file if population failed.
-MLIRBC_DEF MlirBytecodeFile
-mlirBytecodePopulateFile(MlirBytecodeBytesRef bytes);
+//===----------------------------------------------------------------------===//
+// Functions and types required:
+// - Types
+
+typedef struct MlirBytecodeOperationState MlirBytecodeOperationState;
+
+// - Functions
+
+/// Called when creating variable to populate operation state in.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePush(void* callerState, MlirBytecodeOperationState*);
+/// Called when finalizing population of operation state.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePop(void* callerState, MlirBytecodeOperationState*);
+
+/// Called when entering a region with numBlocks blocks and numValues Values
+/// (including values due to block args).
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeRegionEnter(void *, bool isIsolated,
+                                                      size_t numBlocks,
+                                                      size_t numValues);
+
+/// Called when entering block in region. The blockArgs consists of pair
+/// type and location and numOps is the number of ops in the block.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeBlockEnter(
+    void *, MlirBlockArgHandleIterator *blockArgs, size_t numOps);
+
+/// Called per operation in block.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperation(
+    void *, MlirBytecodeOpHandle name, MlirBytecodeAttrHandle attrDict,
+    MlirBytecodeStream *resultTypes, MlirBytecodeStream *operands,
+    MlirBytecodeStream *successors, bool isIsolatedFromAbove,
+    size_t numRegions);
+
+/// Called when exiting the block.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeBlockExit(void *);
+
+/// Called when entering a region.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeRegionExit(void *, bool isIsolated);
+
+/// Called post completed parsing of an isolated from above operation.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeIsolatedOperationExit(void *);
 
 //===----------------------------------------------------------------------===//
-// Callbacks invoked by the section parsing functions below.
-
-// Callbacks accept an opaque pointer as first argument that gets directly
-// propagated during parsing and can be used by instantiation for
-// additional/parse local state capture.
-
-/// Associate dialect with string handle.
-typedef MlirBytecodeStatus (*MlirBytecodeDialectCallBack)(
-    void *, MlirBytecodeDialectHandle, size_t /*total*/,
-    MlirBytecodeStringHandle);
+// Section parsing entry points.
 
 /// Associate dialect and opname with string handle.
 typedef MlirBytecodeStatus (*MlirBytecodeDialectOpCallBack)(
@@ -93,51 +119,17 @@ typedef MlirBytecodeStatus (*MlirBytecodeResourceCallBack)(
 typedef MlirBytecodeStatus (*MlirBytecodeStringCallBack)(
     void *, MlirBytecodeStringHandle, size_t /*total*/, MlirBytecodeBytesRef);
 
-// IR Parsing handlers.
-
-/// Called when entering block in region. The blockArgs consists of pair
-/// type and location and numOps is the number of ops in the block.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeBlockEnter(
-    void *, MlirBlockArgHandleIterator *blockArgs, size_t numOps);
-/// Called when exiting the block.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeBlockExit(void *);
-
-/// Called per operation in block.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperation(
-    void *, MlirBytecodeOpHandle name, MlirBytecodeAttrHandle attrDict,
-    MlirBytecodeStream *resultTypes, MlirBytecodeStream *operands,
-    MlirBytecodeStream *successors, bool isIsolatedFromAbove,
-    size_t numRegions);
-
-/// Called post completed parsing of an isolated from above operation.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeIsolatedOperationExit(void *);
-
-/// Called when entering a region with numBlocks blocks and numValues Values
-/// (including values due to block args).
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeRegionEnter(void *, bool isIsolated,
-                                                      size_t numBlocks,
-                                                      size_t numValues);
-
-/// Called when entering a region.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeRegionExit(void *, bool isIsolated);
-
-/// Parses the given MLIR file represented in memory `bytes`, calls the
-/// appropriate callbacks during parsing. This combines the parsing methods
-/// below.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeParseFile(
-    void *callerState, MlirBytecodeBytesRef bytes,
-    MlirBytecodeAttrCallBack attrFn, MlirBytecodeTypeCallBack typeFn,
-    MlirBytecodeDialectCallBack dialectFn,
-    MlirBytecodeDialectOpCallBack dialectOpFn,
-    MlirBytecodeResourceCallBack resourceFn,
-    MlirBytecodeStringCallBack stringFn);
-
 /// Iterators over attributes and types, calling MlirBytecodeAttrCallBack and
 /// MlirBytecodeTypeCallBack upon encountering Attribute or Type respectively.
 /// Returns whether failed.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeForEachAttributeAndType(
     void *callerState, MlirBytecodeFile *mlirFile,
     MlirBytecodeAttrCallBack attrFn, MlirBytecodeTypeCallBack typeFn);
+
+/// Associate dialect with string handle.
+typedef MlirBytecodeStatus (*MlirBytecodeDialectCallBack)(
+    void *, MlirBytecodeDialectHandle, size_t /*total*/,
+    MlirBytecodeStringHandle);
 
 /// Parses the dialect section, invoking MlirBytecodeDialectCallBack upon
 /// dialect encountered and MlirBytecodeDialectOpCallBack per operation type in
@@ -169,6 +161,25 @@ mlirBytecodeForEachResource(void *callerState, MlirBytecodeFile *mlirFile,
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeForEachString(
     void *callerState, const MlirBytecodeFile *const mlirFile,
     MlirBytecodeStringCallBack fn);
+
+//===----------------------------------------------------------------------===//
+// MLIR file parsing methods.
+
+/// Populates the MlirBytecodeFile contents for given in memory bytes.
+/// Returns an empty file if population failed.
+MLIRBC_DEF MlirBytecodeFile
+mlirBytecodePopulateFile(MlirBytecodeBytesRef bytes);
+
+/// Parses the given MLIR file represented in memory `bytes`, calls the
+/// appropriate callbacks during parsing. This combines the parsing methods
+/// below.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeParseFile(
+    void *callerState, MlirBytecodeBytesRef bytes,
+    MlirBytecodeAttrCallBack attrFn, MlirBytecodeTypeCallBack typeFn,
+    MlirBytecodeDialectCallBack dialectFn,
+    MlirBytecodeDialectOpCallBack dialectOpFn,
+    MlirBytecodeResourceCallBack resourceFn,
+    MlirBytecodeStringCallBack stringFn);
 
 /// Returns whether the given MlirBytecodeFile structure is empty.
 MLIRBC_DEF bool mlirBytecodeFileEmpty(MlirBytecodeFile *file);
