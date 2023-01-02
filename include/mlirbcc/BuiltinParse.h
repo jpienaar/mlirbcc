@@ -434,7 +434,7 @@ static MlirBytecodeStatus parseIntegerAttr(void *state,
                                            MlirBytecodeAttrHandle attrHandle,
                                            MlirBytecodeStream *pp) {
   MlirBytecodeTypeHandle typeHandle;
-  if (mlirBytecodeFailed(mlirBytecodeReadAttrHandle(pp, &typeHandle)))
+  if (mlirBytecodeFailed(mlirBytecodeReadHandle(pp, &typeHandle)))
     return mlirBytecodeFailure();
   // Example of tricky case: without being able to construct the type, there
   // is nothing to query the bitwidth of the type except to ask the
@@ -466,9 +466,9 @@ MlirBytecodeStatus
 mlirBytecodeGetNextDictionaryHandles(MlirDictionaryHandleIterator *iterator,
                                      MlirBytecodeAttrHandle *name,
                                      MlirBytecodeAttrHandle *value) {
-  if (mlirBytecodeFailed(mlirBytecodeReadAttrHandle(&iterator->stream, name)))
+  if (mlirBytecodeFailed(mlirBytecodeReadHandle(&iterator->stream, name)))
     return mlirBytecodeFailure();
-  if (mlirBytecodeFailed(mlirBytecodeReadAttrHandle(&iterator->stream, value)))
+  if (mlirBytecodeFailed(mlirBytecodeReadHandle(&iterator->stream, value)))
     return mlirBytecodeEmitError("can't parse value");
   return mlirBytecodeSuccess();
 }
@@ -499,7 +499,7 @@ static MlirBytecodeStatus parseStringAttr(void *state,
                                           MlirBytecodeAttrHandle attrHandle,
                                           MlirBytecodeStream *pp) {
   MlirBytecodeStringHandle strHandle;
-  if (mlirBytecodeFailed(mlirBytecodeReadAttrHandle(pp, &strHandle)))
+  if (mlirBytecodeFailed(mlirBytecodeReadHandle(pp, &strHandle)))
     return mlirBytecodeFailure();
   return mlirBytecodeCreateBuiltinStrAttr(state, attrHandle, strHandle);
 }
@@ -509,8 +509,8 @@ parseStringAttrWithType(void *bcUserState, MlirBytecodeAttrHandle bcAttrHandle,
                         MlirBytecodeStream *bcStream) {
   MlirBytecodeStringHandle value;
   MlirBytecodeTypeHandle type;
-  if (mlirBytecodeSucceeded(mlirBytecodeReadAttrHandle(bcStream, &value)) &&
-      mlirBytecodeSucceeded(mlirBytecodeReadAttrHandle(bcStream, &type))) {
+  if (mlirBytecodeSucceeded(mlirBytecodeReadHandle(bcStream, &value)) &&
+      mlirBytecodeSucceeded(mlirBytecodeReadHandle(bcStream, &type))) {
     return mlirBytecodeCreateBuiltinStringAttrWithType(
         bcUserState, bcAttrHandle, value, type);
   }
@@ -521,7 +521,7 @@ static MlirBytecodeStatus parseTypeAttr(void *bcUserState,
                                         MlirBytecodeAttrHandle bcAttrHandle,
                                         MlirBytecodeStream *bcStream) {
   MlirBytecodeTypeHandle value;
-  if (mlirBytecodeSucceeded(mlirBytecodeReadAttrHandle(bcStream, &value)))
+  if (mlirBytecodeSucceeded(mlirBytecodeReadHandle(bcStream, &value)))
     return mlirBytecodeCreateBuiltinTypeAttr(bcUserState, bcAttrHandle, value);
 
   return mlirBytecodeEmitError("invalid TypeAttr");
