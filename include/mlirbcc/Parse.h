@@ -50,6 +50,8 @@
 extern "C" {
 #endif
 
+typedef struct MlirBytecodeHandleRange MlirBytecodeHandleRange;
+
 //===----------------------------------------------------------------------===//
 // Functions and types required:
 // - Types
@@ -59,40 +61,49 @@ extern "C" {
 
 /// Called when creating variable to populate operation state in.
 MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOperationState *);
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeOperationStateAddAttributes(void* callerState, MlirBytecodeOperationState* cur, MlirBytecodeAttrHandle attrDict);
+mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOperationState *, MlirBytecodeLocHandle);
+
 /// Called when finalizing population of operation state.
 MLIRBC_DEF MlirBytecodeStatus
 mlirBytecodeOperationStatePop(void *callerState, MlirBytecodeOperationState *);
 
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddAttributes(
+    void *callerState, MlirBytecodeOperationState *, MlirBytecodeAttrHandle);
+
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
+    void *callerState, MlirBytecodeOperationState *, MlirBytecodeStream *,
+    uint64_t);
+
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
+    void *callerState, MlirBytecodeOperationState *, MlirBytecodeStream *,
+    uint64_t);
+
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddBlocks(
+    void *callerState, MlirBytecodeOperationState *, uint64_t);
+
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
+    void *callerState, MlirBytecodeOperationState *, uint64_t);
+
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
+    void *callerState, MlirBytecodeOperationState *, MlirBytecodeStream *,
+    uint64_t);
+
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
+    void *callerState, MlirBytecodeOperationState *, MlirBytecodeStream *,
+    uint64_t);
+
 /// Called when entering a region with numBlocks blocks and numValues Values
 /// (including values due to block args).
-typedef MlirBytecodeStatus (*MlirBytecodeRegionEnter)(void *, bool isIsolated,
-                                                      size_t numBlocks,
-                                                      size_t numValues);
-
-/// Called when entering block in region. The blockArgs consists of pair
-/// type and location and numOps is the number of ops in the block.
-typedef MlirBytecodeStatus (*MlirBytecodeBlockEnter)(
-    void *, MlirBlockArgHandleIterator *blockArgs, size_t numOps);
-
-/// Called per operation in block.
-typedef MlirBytecodeStatus (*MlirBytecodeOperation)(
-    void *, MlirBytecodeOpHandle name, MlirBytecodeAttrHandle attrDict,
-    MlirBytecodeStream *resultTypes, MlirBytecodeStream *operands,
-    MlirBytecodeStream *successors, bool isIsolatedFromAbove,
-    size_t numRegions);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeRegionEnter(
+    void *, MlirBytecodeOperationState *, size_t numBlocks, size_t numValues);
 
 /// Called when exiting the block.
-typedef MlirBytecodeStatus (*MlirBytecodeBlockExit)(void *);
+MLIRBC_DEF MlirBytecodeStatus
+mlirBytecodeBlockExit(void *callerState, MlirBytecodeOperationState *);
 
 /// Called when entering a region.
-typedef MlirBytecodeStatus (*MlirBytecodeRegionExit)(void *, bool isIsolated);
-
-/// Called post completed parsing of an isolated from above operation.
-typedef MlirBytecodeStatus (*MlirBytecodeIsolatedOperationExit)(
-    void *, bool isIsolated);
+MLIRBC_DEF MlirBytecodeStatus
+mlirBytecodeRegionExit(void *callerState, MlirBytecodeOperationState *);
 
 //===----------------------------------------------------------------------===//
 // Section parsing entry points.
@@ -153,11 +164,8 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeParseDialectSection(
 /// The caller is required to keep track of when all operations/blocks in
 /// block/region have been processed and so parsing resumes at parent level.
 /// Returns whether failed.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeParseIRSection(
-    void *callerState, MlirBytecodeFile *mlirFile, MlirBytecodeOperation opFn,
-    MlirBytecodeRegionEnter regionEnterFn, MlirBytecodeBlockEnter blockEnterFn,
-    MlirBytecodeBlockExit blockExitFn, MlirBytecodeRegionExit regionExitFn,
-    MlirBytecodeIsolatedOperationExit opExitFn);
+MLIRBC_DEF MlirBytecodeStatus
+mlirBytecodeParseIRSection(void *callerState, MlirBytecodeFile *mlirFile);
 
 /// Parse the resource section, calling MlirBytecodeResourceCallBack upon
 /// resources encountered. Returns whether failed.
@@ -188,12 +196,7 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeParseFile(
     MlirBytecodeDialectCallBack dialectFn,
     MlirBytecodeDialectOpCallBack dialectOpFn,
     MlirBytecodeResourceCallBack resourceFn,
-    MlirBytecodeStringCallBack stringFn,
-    // IR section parsing callbacks.
-    MlirBytecodeOperation opFn, MlirBytecodeRegionEnter regionEnterFn,
-    MlirBytecodeBlockEnter blockEnterFn, MlirBytecodeBlockExit blockExitFn,
-    MlirBytecodeRegionExit regionExitFn,
-    MlirBytecodeIsolatedOperationExit opExitFn);
+    MlirBytecodeStringCallBack stringFn);
 
 /// Returns whether the given MlirBytecodeFile structure is empty.
 MLIRBC_DEF bool mlirBytecodeFileEmpty(MlirBytecodeFile *file);
@@ -214,7 +217,7 @@ MLIRBC_DEF void mlirBytecodeStreamReset(MlirBytecodeStream *iterator);
 
 /// Decode the next handle on the stream and increment stream.
 MlirBytecodeStatus mlirBytecodeReadAttrHandle(MlirBytecodeStream *iterator,
-                                             MlirBytecodeAttrHandle *result);
+                                              MlirBytecodeAttrHandle *result);
 
 /// Decode uint64 on the stream and increment stream.
 MLIRBC_DEF MlirBytecodeStatus
@@ -300,13 +303,12 @@ enum ID {
   mbci_kNumSections = 7,
 };
 
-struct MlirFileInternal {
+struct MlirBytecodeFile {
   uint64_t version;
   MlirBytecodeBytesRef producer;
 
   MlirBytecodeBytesRef sectionData[mbci_kNumSections];
 };
-typedef struct MlirFileInternal MlirFileInternal;
 
 const char *mbci_sectionIDToString(uint8_t id) {
   const char *arr[] = {
@@ -452,7 +454,7 @@ static MlirBytecodeStatus mbci_skipVarInts(MlirBytecodeStream *pp, size_t n) {
 }
 
 MlirBytecodeStatus mlirBytecodeReadAttrHandle(MlirBytecodeStream *iterator,
-                                             MlirBytecodeAttrHandle *result) {
+                                              MlirBytecodeAttrHandle *result) {
   return mlirBytecodeReadVarInt(iterator, &result->id);
 }
 
@@ -592,7 +594,7 @@ MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes) {
 
 static MlirBytecodeBytesRef mbci_getSection(const MlirBytecodeFile *const file,
                                             int index) {
-  return ((MlirFileInternal *)file)->sectionData[index];
+  return file->sectionData[index];
 }
 
 MlirBytecodeStatus
@@ -913,6 +915,9 @@ bool mlirBytecodeIsSentinel(MlirBytecodeAttrHandle attr) {
 // Reserve top most for in-process op construction with or without regions.
 const int mbci_MlirIRSectionStackMaxDepth = 16 - 1;
 
+// Sentinel value to indicate unset number of blocks & ops remaining.
+const int mbci_MlirIRSectionStackUnset = -1;
+
 // We keep the following on the stack for a op with regions when descending into
 // regions:
 struct mbci_MlirIRSectionStackEntry {
@@ -944,30 +949,27 @@ struct mbci_MlirIRSectionStack {
 };
 typedef struct mbci_MlirIRSectionStack mbci_MlirIRSectionStack;
 
-static mbci_MlirIRSectionStackEntry* mbci_getStackTop(mbci_MlirIRSectionStack *stack) {
+static mbci_MlirIRSectionStackEntry *
+mbci_getStackTop(mbci_MlirIRSectionStack *stack) {
   return &stack->data[stack->top];
 }
-static mbci_MlirIRSectionStackEntry* mbci_getStackWIP(mbci_MlirIRSectionStack *stack) {
-  return &stack->data[stack->top+1];
+static mbci_MlirIRSectionStackEntry *
+mbci_getStackWIP(mbci_MlirIRSectionStack *stack) {
+  return &stack->data[stack->top + 1];
 }
 
 // Initialize stack entry with required state to resume. `op` is initialized
 // already and so not passed in.
 static MlirBytecodeStatus
-mbci_mlirIRSectionStackPush(
-  uint16_t numRegionsRemaining,
-  uint16_t numBlocksRemaining,
-  uint16_t numOpsRemaining,
-                                mbci_MlirIRSectionStack *stack) {
-  if (stack->top == mbci_MlirIRSectionStackMaxDepth ) {
+mbci_mlirIRSectionStackPush(mbci_MlirIRSectionStack *stack) {
+  if (stack->top == mbci_MlirIRSectionStackMaxDepth) {
     mlirBytecodeEmitError("IR stack max depth exceeded");
     return mlirBytecodeIterationInterrupt();
   }
-                                  ++stack->top;
-  mbci_MlirIRSectionStackEntry* it = mbci_getStackTop(stack);
-  it->numRegionsRemaining = numRegionsRemaining;
-  it->numBlocksRemaining = numBlocksRemaining;
-  it->numOpsRemaining = numOpsRemaining;
+  ++stack->top;
+  mbci_MlirIRSectionStackEntry *it = mbci_getStackTop(stack);
+  it->numBlocksRemaining = mbci_MlirIRSectionStackUnset;
+  it->numOpsRemaining = mbci_MlirIRSectionStackUnset;
 
   return mlirBytecodeSuccess();
 }
@@ -976,74 +978,57 @@ static MlirBytecodeStatus
 mbci_mlirIRSectionStackPop(mbci_MlirIRSectionStack *stack) {
   if (stack->top == 0)
     return mlirBytecodeEmitError("IR stack exhausted");
-                                  --stack->top;
+  --stack->top;
   return mlirBytecodeSuccess();
 }
 
 static MlirBytecodeStatus mbci_parseBlock(MlirBytecodeStream *pp,
                                           mbci_MlirIRSectionStack *stack,
-                                          void *callerState,
-                                          MlirBytecodeBlockEnter blockEnterFn) {
+                                          void *callerState) {
+  mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(stack);
   bool hasArgs;
-  uint64_t numOps;
+  uint64_t numOpsRemaining;
   if (mlirBytecodeFailed(
-          mlirBytecodeParseVarIntWithFlag(pp, &numOps, &hasArgs)))
+          mlirBytecodeParseVarIntWithFlag(pp, &numOpsRemaining, &hasArgs)))
     return mlirBytecodeEmitError("unable to parse block's number of args");
+  top->numOpsRemaining = numOpsRemaining;
 
-  const uint8_t *start = pp->pos;
   uint64_t numArgs = 0;
   if (hasArgs) {
     if (mlirBytecodeFailed(mbci_parseVarInt(pp, &numArgs)))
       return mlirBytecodeEmitError("invalid/missing number of block args");
-    start = pp->pos;
-    if (mlirBytecodeFailed(mbci_skipVarInts(pp, 2 * numArgs)))
-      return mlirBytecodeEmitError("invalid/missing type or location");
   }
-  MlirBlockArgHandleIterator blockArgs = {.count = numArgs};
-  blockArgs.stream.start = blockArgs.stream.pos = start;
-  blockArgs.stream.end = pp->pos;
-
-  mbci_mlirIRSectionStackDec(stack);
-  if (mlirBytecodeFailed(blockEnterFn(callerState, &blockArgs, numOps)))
-    return mlirBytecodeFailure();
-
-  mbci_mlirIRSectionStackPushBack(kStackOperation, numOps, stack);
-  return mlirBytecodeSuccess();
+  return mlirBytecodeOperationStateBlockPush(callerState, &top->op, pp,
+                                             numArgs);
 }
 
-static MlirBytecodeStatus
-mbci_parseRegions(MlirBytecodeStream *pp, mbci_MlirIRSectionStack *stack,
-                 int numRegions,
-                 void *state, 
-                 MlirBytecodeRegionEnter regionEnterFn,
-                 MlirBytecodeBlockEnter blockEnterFn,
-                 MlirBytecodeBlockExit blockExitFn,
-                 MlirBytecodeRegionExit regionExitFn,
-                 bool isIsolated) {
-  uint64_t numBlocks;
-  if (mlirBytecodeFailed(mbci_parseVarInt(pp, &numBlocks)))
+static MlirBytecodeStatus mbci_parseRegion(MlirBytecodeStream *pp,
+                                           mbci_MlirIRSectionStack *stack,
+                                           void *state) {
+  mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(stack);
+  uint64_t numBlocksRemaining;
+  if (mlirBytecodeFailed(mbci_parseVarInt(pp, &numBlocksRemaining)))
     return mlirBytecodeEmitError("invalid number of blocks");
-  if (numBlocks == 0)
+  numBlocksRemaining = top->numBlocksRemaining;
+  if (top->numBlocksRemaining == 0)
     return mlirBytecodeSuccess();
+
+  MlirBytecodeStatus ret =
+      mlirBytecodeOperationStateAddRegions(state, &top->op, numBlocksRemaining);
+  if (!mlirBytecodeSucceeded(ret))
+    return ret;
 
   uint64_t numValues;
   if (mlirBytecodeFailed(mbci_parseVarInt(pp, &numValues)))
     return mlirBytecodeEmitError("invalid/missing number of values in region");
 
-  mbci_mlirIRSectionStackDec(stack);
-  if (mlirBytecodeFailed(
-          regionEnterFn(state, isIsolated, numBlocks, numValues)))
-    return mlirBytecodeFailure();
-
-  mbci_mlirIRSectionStackPushBack(
-      isIsolated ? kStackBlockIsolated : kStackBlock, numBlocks, stack);
-  return mlirBytecodeSuccess();
+  return mlirBytecodeRegionEnter(state, &top->op, top->numBlocksRemaining,
+                                 numValues);
 }
 
 static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *pp,
                                               mbci_MlirIRSectionStack *stack,
-                                              void *callerState,
-                                              MlirBytecodeOperation opFn) {
+                                              void *callerState) {
   enum OpEncodingMask {
     kHasAttrs = 0x01,
     kHasResults = 0x02,
@@ -1060,13 +1045,15 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *pp,
   if (mlirBytecodeFailed(mbci_parseByte(pp, &encodingMask)))
     return mlirBytecodeEmitError("invalid encoding mask");
 
-  MlirBytecodeAttrHandle loc;
+  MlirBytecodeLocHandle loc;
   if (mlirBytecodeFailed(mbci_parseVarInt(pp, (uint64_t *)&loc)))
     return mlirBytecodeEmitError("invalid operation location");
 
-  mbci_MlirIRSectionStackEntry* cur = mbci_getStackWIP(stack);
-  MlirBytecodeStatus ret = mlirBytecodeOperationStatePush(callerState, cur);
-  if (!mlirBytecodeSucceeded(ret)) return ret;
+  mbci_MlirIRSectionStackEntry *cur = mbci_getStackWIP(stack);
+  MlirBytecodeStatus ret =
+      mlirBytecodeOperationStatePush(callerState, &cur->op, loc);
+  if (!mlirBytecodeSucceeded(ret))
+    return ret;
 
   if (encodingMask & kHasAttrs) {
     MlirBytecodeAttrHandle attrDict;
@@ -1074,92 +1061,73 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *pp,
       // TODO: add attributes here instead of using sentinel.
       return mlirBytecodeEmitError("invalid op attribute handle");
     }
-    ret = mlirBytecodeOperationStateAddAttributes(callerState, cur, attrDict);
+    ret = mlirBytecodeOperationStateAddAttributes(callerState, &cur->op,
+                                                  attrDict);
   }
 
-  // TODO: avoid double parsing.
-
   // Parsing all the variadic sizes.
-  // This could have been done by using additional memory instead of
-  // reparsing, but keeping number of allocations to minimum.
-  uint64_t numResults = 0;
-  const uint8_t *start = pp->pos;
-  if ((encodingMask & kHasResults)) {
+  if (encodingMask & kHasResults) {
+    uint64_t numResults = 0;
     if (mlirBytecodeSucceeded(mbci_parseVarInt(pp, &numResults))) {
-      start = pp->pos;
-      if (mlirBytecodeFailed(mbci_skipVarInts(pp, numResults)))
-        return mlirBytecodeEmitError("invalid result type");
+      ret = mlirBytecodeOperationStateAddResultTypes(callerState, &cur->op, pp,
+                                                     numResults);
+      if (!mlirBytecodeSucceeded(ret))
+        return mlirBytecodeEmitError("invalid result type"), ret;
     } else {
       return mlirBytecodeEmitError("invalid number of results");
     }
   }
-  MlirBytecodeHandleIterator resultTypes = {.count = numResults};
-  resultTypes.stream.start = resultTypes.stream.pos = start;
-  resultTypes.stream.end = pp->pos;
 
-  uint64_t numOperands = 0;
-  start = pp->pos;
-  if ((encodingMask & kHasOperands)) {
+  if (encodingMask & kHasOperands) {
+    uint64_t numOperands = 0;
     if (mlirBytecodeSucceeded(mbci_parseVarInt(pp, &numOperands))) {
-      start = pp->pos;
-      if (mlirBytecodeFailed(mbci_skipVarInts(pp, numOperands)))
-        return mlirBytecodeEmitError("invalid operand");
+      ret = mlirBytecodeOperationStateAddOperands(callerState, &cur->op, pp,
+                                                  numOperands);
+      if (!mlirBytecodeSucceeded(ret))
+        return mlirBytecodeEmitError("invalid operands"), ret;
     } else {
       return mlirBytecodeEmitError("invalid number of operands");
     }
   }
-  MlirBytecodeHandleIterator operands = {.count = numOperands};
-  operands.stream.start = operands.stream.pos = start;
-  operands.stream.end = pp->pos;
 
-  uint64_t numSuccessors = 0;
-  start = pp->pos;
-  if ((encodingMask & kHasSuccessors)) {
+  if (encodingMask & kHasSuccessors) {
+    uint64_t numSuccessors = 0;
     if (mlirBytecodeSucceeded(mbci_parseVarInt(pp, &numSuccessors))) {
-      start = pp->pos;
-      if (mlirBytecodeFailed(mbci_skipVarInts(pp, numSuccessors)))
-        return mlirBytecodeEmitError("invalid operand");
+      ret = mlirBytecodeOperationStateAddSuccessors(callerState, &cur->op, pp,
+                                                    numSuccessors);
+      if (!mlirBytecodeSucceeded(ret))
+        return mlirBytecodeEmitError("invalid successors"), ret;
     } else {
       return mlirBytecodeEmitError("invalid number of successors");
     }
   }
-  MlirBytecodeHandleIterator successors = {.count = numSuccessors};
-  successors.stream.start = successors.stream.pos = start;
-  successors.stream.end = pp->end;
 
-  uint64_t numRegions = 0;
-  bool isIsolatedFromAbove = false;
   if (encodingMask & kHasInlineRegions) {
+    uint64_t numRegions = 0;
+    bool isIsolatedFromAbove = false;
     if (mlirBytecodeFailed(mlirBytecodeParseVarIntWithFlag(
             pp, &numRegions, &isIsolatedFromAbove))) {
       return mlirBytecodeEmitError("invalid number of regions");
     }
-  } else {
-    ret = mlirBytecodeOperationStatePop(callerState,cur);
+    ret =
+        mlirBytecodeOperationStateAddRegions(callerState, &cur->op, numRegions);
+    if (!mlirBytecodeSucceeded(ret))
+      return ret;
+    cur->numRegionsRemaining = numRegions;
+    ret = mbci_mlirIRSectionStackPush(stack);
     return mlirBytecodeSuccess();
   }
 
-  mbci_mlirIRSectionStackDec(stack);
-  if (mlirBytecodeFailed(opFn(
-          callerState, (MlirBytecodeOpHandle){.id = name}, attrDict,
-          (MlirBytecodeStream *)&resultTypes, (MlirBytecodeStream *)&operands,
-          (MlirBytecodeStream *)&successors, isIsolatedFromAbove, numRegions)))
-    return mlirBytecodeEmitError("op function callback failed");
-
-  if (numRegions > 0) {
-    mbci_mlirIRSectionStackPushBack(isIsolatedFromAbove ? kStackRegionIsolated
-                                                        : kStackRegion,
-                                    numRegions, stack);
-  }
-
-  return mlirBytecodeSuccess();
+  // Completed parsing of op.
+  ret = mlirBytecodeOperationStatePop(callerState, &cur->op);
+  if (!mlirBytecodeSucceeded(ret))
+    return ret;
+  --cur->numOpsRemaining;
+  return ret;
 }
 
-MlirBytecodeStatus mlirBytecodeParseIRSection(
-    void *callerState, MlirBytecodeFile *mlirFile, MlirBytecodeOperation opFn,
-    MlirBytecodeRegionEnter regionEnterFn, MlirBytecodeBlockEnter blockEnterFn,
-    MlirBytecodeBlockExit blockExitFn, MlirBytecodeRegionExit regionExitFn,
-    MlirBytecodeIsolatedOperationExit opExitFn) {
+MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
+                                              MlirBytecodeFile *mlirFile) {
   const MlirBytecodeBytesRef irSection = mbci_getSection(mlirFile, mbci_kIR);
   MlirBytecodeStream pp = mbci_populateParserPosForSection(irSection);
 
@@ -1173,68 +1141,74 @@ MlirBytecodeStatus mlirBytecodeParseIRSection(
   if (numOps != 1)
     return mlirBytecodeEmitError("only one top-level op supported");
 
-  // P
+  // Initialize with parsing of top-level.
   mbci_MlirIRSectionStack stack = {.top = -1};
-  mbci_parseOperation(&pp, &stack, callerState, opFn);
-
-  mbci_mlirIRSectionStackPushBack(kStackOperation, numOps, &stack);
+  mbci_parseOperation(&pp, &stack, callerState);
 
   while (stack.top != -1) {
-    uint64_t top = stack.data[stack.top];
+    mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(&stack);
 
-    mbci_IRStackType cur = top & ((1 << mbci_irStackShift) - 1);
+    MlirBytecodeStatus ret;
+    bool next = false;
+    if (top->numOpsRemaining == 0) {
+      ret = mlirBytecodeBlockExit(callerState, &top->op);
+      if (!mlirBytecodeSucceeded(ret))
+        return ret;
 
-    if ((top >> mbci_irStackShift) == 0) {
-      if (cur == kStackOperation &&
-          mlirBytecodeFailed(blockExitFn(callerState)))
-        return mlirBytecodeFailure();
-      if ((cur == kStackBlock || cur == kStackBlockIsolated) &&
-          mlirBytecodeFailed(
-              regionExitFn(callerState, cur == kStackBlockIsolated)))
-        return mlirBytecodeFailure();
-      if ((cur == kStackRegion || cur == kStackRegionIsolated) &&
-          mlirBytecodeFailed(
-              opExitFn(callerState, cur == kStackRegionIsolated)))
-        return mlirBytecodeFailure();
-      --stack.top;
-      continue;
+      --top->numBlocksRemaining;
+      top->numOpsRemaining = mbci_MlirIRSectionStackUnset;
+      next = true;
     }
+    if (top->numBlocksRemaining == 0) {
+      ret = mlirBytecodeRegionExit(callerState, &top->op);
+      if (!mlirBytecodeSucceeded(ret))
+        return ret;
 
-    switch (cur) {
-    case kStackBlock:
-    case kStackBlockIsolated:
-      if (mlirBytecodeFailed(
-              mbci_parseBlock(&pp, &stack, callerState, blockEnterFn)))
-        return mlirBytecodeFailure();
-      break;
-    case kStackOperation:
-      if (mlirBytecodeFailed(
-              mbci_parseOperation(&pp, &stack, callerState, opFn)))
-        return mlirBytecodeFailure();
-      break;
-    case kStackRegionIsolated:
-    case kStackRegion:
-      if (mlirBytecodeFailed(mbci_parseRegion(&pp, &stack,
-      callerState,
-                                              regionEnterFn,
-                                              blockEnterFn,
-                                              blockExitFn,
-                                              regionExitFn,
-                                              cur == kStackRegionIsolated)))
-        return mlirBytecodeFailure();
-      break;
+      --top->numRegionsRemaining;
+      top->numBlocksRemaining = mbci_MlirIRSectionStackUnset;
+      next = true;
+    }
+    if (top->numRegionsRemaining == 0) {
+      ret = mlirBytecodeOperationStatePop(callerState, &top->op);
+      if (!mlirBytecodeSucceeded(ret))
+        return ret;
+
+      // Complete parsing of op.
+      ret = mlirBytecodeOperationStatePop(callerState, &top->op);
+      if (!mlirBytecodeSucceeded(ret))
+        return ret;
+      --top->numOpsRemaining;
+      mbci_mlirIRSectionStackPop(&stack);
+      next = true;
+    }
+    if (next)
+      continue;
+
+    if (top->numBlocksRemaining == mbci_MlirIRSectionStackUnset) {
+      ret = mbci_parseRegion(&pp, &stack, callerState);
+      if (!mlirBytecodeSucceeded(ret))
+        return ret;
+    }
+    if (top->numOpsRemaining == mbci_MlirIRSectionStackUnset) {
+      ret = mbci_parseBlock(&pp, &stack, callerState);
+      if (!mlirBytecodeSucceeded(ret))
+        return ret;
+    } else {
+      ret = mbci_parseOperation(&pp, &stack, callerState);
+      if (!mlirBytecodeSucceeded(ret))
+        return ret;
     }
   }
   return mlirBytecodeSuccess();
 }
 
 bool mlirBytecodeFileEmpty(MlirBytecodeFile *file) {
-  return ((MlirFileInternal *)file->b)->producer.length == 0;
+  return file->producer.length == 0;
 }
 
 MlirBytecodeFile mlirBytecodePopulateFile(const MlirBytecodeBytesRef bytes) {
-  MlirBytecodeFile ret = {.b = 0};
-  MlirFileInternal *mlirFile = (MlirFileInternal *)&ret.b;
+  MlirBytecodeFile ret;
+  memset(&ret, 0, sizeof(MlirBytecodeFile));
   MlirBytecodeStream pp = mbci_populateParserPosForSection(bytes);
 
   uint8_t magic[4];
@@ -1245,14 +1219,14 @@ MlirBytecodeFile mlirBytecodePopulateFile(const MlirBytecodeBytesRef bytes) {
 
   // Parse the bytecode version and producer.
   MlirBytecodeBytesRef producer;
-  if (mlirBytecodeFailed(mbci_parseVarInt(&pp, &mlirFile->version)) ||
+  if (mlirBytecodeFailed(mbci_parseVarInt(&pp, &ret.version)) ||
       mlirBytecodeFailed(mlirBytecodeParseNullTerminatedString(&pp, &producer)))
     return mlirBytecodeEmitError("invalid version or producer"), ret;
   mlirBytecodeEmitDebug("Producer: %s\n", producer.data);
 
   while (!mbci_streamEmpty(&pp)) {
     // Read the next section from the bytecode.
-    if (mlirBytecodeFailed(mbci_parseSections(&pp, mlirFile->sectionData)))
+    if (mlirBytecodeFailed(mbci_parseSections(&pp, ret.sectionData)))
       return mlirBytecodeEmitError("invalid section"), ret;
   }
 
@@ -1265,25 +1239,18 @@ MlirBytecodeFile mlirBytecodePopulateFile(const MlirBytecodeBytesRef bytes) {
     }
   }
   // Mark as valid.
-  mlirFile->producer = producer;
+  ret.producer = producer;
   return ret;
 }
 
-MlirBytecodeStatus mlirBytecodeParseFile(
-    void *callerState, MlirBytecodeBytesRef bytes,
-    MlirBytecodeAttrCallBack attrFn, MlirBytecodeTypeCallBack typeFn,
-    MlirBytecodeDialectCallBack dialectFn,
-    MlirBytecodeDialectOpCallBack dialectOpFn,
-    MlirBytecodeResourceCallBack resourceFn,
-    MlirBytecodeStringCallBack stringFn, MlirBytecodeOperation opFn,
-    MlirBytecodeRegionEnter regionEnterFn, MlirBytecodeBlockEnter blockEnterFn,
-    MlirBytecodeBlockExit blockExitFn, MlirBytecodeRegionExit regionExitFn,
-    MlirBytecodeIsolatedOperationExit opExitFn) {
-  static_assert(sizeof(MlirFileInternal) == sizeof(MlirBytecodeFile),
-                "MlirBytecodeFile shell type size mismatch");
-  static_assert(alignof(MlirFileInternal) == alignof(MlirBytecodeFile),
-                "MlirBytecodeFile shell type alignment mismatch");
-
+MlirBytecodeStatus
+mlirBytecodeParseFile(void *callerState, MlirBytecodeBytesRef bytes,
+                      MlirBytecodeAttrCallBack attrFn,
+                      MlirBytecodeTypeCallBack typeFn,
+                      MlirBytecodeDialectCallBack dialectFn,
+                      MlirBytecodeDialectOpCallBack dialectOpFn,
+                      MlirBytecodeResourceCallBack resourceFn,
+                      MlirBytecodeStringCallBack stringFn) {
   MlirBytecodeFile mlirFile = mlirBytecodePopulateFile(bytes);
   if (mlirBytecodeFileEmpty(&mlirFile))
     return mlirBytecodeFailure();
@@ -1302,9 +1269,7 @@ MlirBytecodeStatus mlirBytecodeParseFile(
       mlirBytecodeFailed(mlirBytecodeForEachAttributeAndType(
           callerState, &mlirFile, attrFn, typeFn)) ||
       // Finally, process the IR section.
-      mlirBytecodeFailed(mlirBytecodeParseIRSection(
-          callerState, &mlirFile, opFn, regionEnterFn, blockEnterFn,
-          blockExitFn, regionExitFn, opExitFn)))
+      mlirBytecodeFailed(mlirBytecodeParseIRSection(callerState, &mlirFile)))
     return mlirBytecodeFailure();
 
   return mlirBytecodeSuccess();

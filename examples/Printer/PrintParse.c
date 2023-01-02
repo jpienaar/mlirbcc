@@ -26,6 +26,7 @@
 // Define struct that captures operation state during parsing.
 struct MlirBytecodeOperationState {
   char *name;
+  bool isIsolated;
 };
 typedef struct MlirBytecodeOperationState MlirBytecodeOperationState;
 
@@ -495,23 +496,81 @@ MlirBytecodeStatus mlirBytecodeBlockEnter(void *state,
 
   return mlirBytecodeSuccess();
 }
-MlirBytecodeStatus mlirBytecodeBlockExit(void *state) {
+MlirBytecodeStatus mlirBytecodeBlockExit(void *state,
+                                         MlirBytecodeOperationState *opState) {
   indentSize -= 2;
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeRegionEnter(void *state, bool isIsolated,
+MlirBytecodeStatus mlirBytecodeRegionEnter(void *state,
+                                           MlirBytecodeOperationState *opState,
                                            size_t numBlocks, size_t numValues) {
-  if (isIsolated)
+  if (opState->isIsolated)
     ssaIdStack[++depth] = 0;
   indentSize += 2;
   return mlirBytecodeSuccess();
 }
-MlirBytecodeStatus mlirBytecodeRegionExit(void *state, bool isIsolated) {
-  if (isIsolated)
+MlirBytecodeStatus mlirBytecodeRegionExit(void *state,
+                                          MlirBytecodeOperationState *opState) {
+  if (opState->isIsolated)
     --depth;
   indentSize -= 2;
   return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus mlirBytecodeOperationStateAddAttributes(
+    void *callerState, MlirBytecodeOperationState *opState, MlirBytecodeAttrHandle attrs) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeOperationStateAddResultTypes(void *callerState,
+                                         MlirBytecodeOperationState *opState,
+                                         MlirBytecodeStream *stream, uint64_t n) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeOperationStateAddOperands(void *callerState,
+                                      MlirBytecodeOperationState *opState,
+                                      MlirBytecodeStream *stream, uint64_t n) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeOperationStateAddBlocks(void *callerState,
+                                    MlirBytecodeOperationState *opState, uint64_t n) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeOperationStateAddRegions(void *callerState,
+                                     MlirBytecodeOperationState *opState, uint64_t n) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeOperationStateAddSuccessors(void *callerState,
+                                        MlirBytecodeOperationState *opState,
+                                        MlirBytecodeStream *stream, uint64_t n) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeOperationStateBlockPush(void *callerState,
+                                    MlirBytecodeOperationState *opState,
+                                    MlirBytecodeStream *stream, uint64_t n) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOperationState *opState, MlirBytecodeLocHandle loc) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeOperationStatePop(void *callerState, MlirBytecodeOperationState *opState) {
+  return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus mlirBytecodeOperation(void *state, MlirBytecodeOpHandle name,
@@ -693,10 +752,7 @@ int main(int argc, char **argv) {
 
   fprintf(stderr, "Parsing IR\n");
   indentSize = 0;
-  if (mlirBytecodeFailed(mlirBytecodeParseIRSection(
-          NULL, refFile, &mlirBytecodeOperation, &mlirBytecodeRegionEnter,
-          &mlirBytecodeBlockEnter, &mlirBytecodeBlockExit,
-          &mlirBytecodeRegionExit, &mlirBytecodeIsolatedOperationExit))) {
+  if (mlirBytecodeFailed(mlirBytecodeParseIRSection(NULL, refFile))) {
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse IR"), 1;
   }
 

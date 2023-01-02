@@ -29,6 +29,7 @@ typedef MlirBytecodeHandle MlirBytecodeDialectHandle;
 typedef MlirBytecodeHandle MlirBytecodeOpHandle;
 typedef MlirBytecodeHandle MlirBytecodeStringHandle;
 typedef MlirBytecodeHandle MlirBytecodeTypeHandle;
+typedef MlirBytecodeHandle MlirBytecodeLocHandle;
 
 // Reference to section of memory.
 // Does not own the underlying string. This is equivalent to llvm::StringRef.
@@ -49,10 +50,6 @@ struct MlirBytecodeOpRef {
 typedef struct MlirBytecodeOpRef MlirBytecodeOpRef;
 
 // MLIR file structure.
-struct MlirBytecodeFile {
-  // Shell type to allow stack allocation in caller.
-  alignas(MlirBytecodeHandle *) char b[136];
-};
 typedef struct MlirBytecodeFile MlirBytecodeFile;
 
 // MLIR bytecode stream.
