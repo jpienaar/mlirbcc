@@ -23,6 +23,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+// Define struct that captures operation state during parsing.
+struct MlirBytecodeOperationState {
+  char *name;
+};
+typedef struct MlirBytecodeOperationState MlirBytecodeOperationState;
+
 #define MLIRBC_PARSE_IMPLEMENTATION
 #include "mlirbcc/Parse.h"
 // Dialects.
@@ -527,7 +533,7 @@ MlirBytecodeStatus mlirBytecodeOperation(void *state, MlirBytecodeOpHandle name,
   MlirBytecodeTypeHandle retTy;
   first = true;
   while (
-      mlirBytecodeSucceeded(mlirBytecodeGetNextHandle(resultTypes, &retTy))) {
+      mlirBytecodeSucceeded(mlirBytecodeReadAttrHandle(resultTypes, &retTy))) {
     if (!first)
       printf(", ");
 
@@ -547,7 +553,7 @@ MlirBytecodeStatus mlirBytecodeOperation(void *state, MlirBytecodeOpHandle name,
 
   MlirBytecodeOpHandle op;
   first = true;
-  while (mlirBytecodeSucceeded(mlirBytecodeGetNextHandle(operands, &op))) {
+  while (mlirBytecodeSucceeded(mlirBytecodeReadAttrHandle(operands, &op))) {
     if (first)
       printf("(%%%" PRIu64, (uint64_t)op.id);
     else
@@ -560,7 +566,7 @@ MlirBytecodeStatus mlirBytecodeOperation(void *state, MlirBytecodeOpHandle name,
   first = true;
   mlirBytecodeStreamReset(resultTypes);
   while (
-      mlirBytecodeSucceeded(mlirBytecodeGetNextHandle(resultTypes, &retTy))) {
+      mlirBytecodeSucceeded(mlirBytecodeReadAttrHandle(resultTypes, &retTy))) {
     if (first)
       printf(" : ");
     else
@@ -577,7 +583,8 @@ MlirBytecodeStatus mlirBytecodeOperation(void *state, MlirBytecodeOpHandle name,
   printf("\n");
   return mlirBytecodeSuccess();
 }
-MlirBytecodeStatus mlirBytecodeIsolatedOperationExit(void *state) {
+MlirBytecodeStatus mlirBytecodeIsolatedOperationExit(void *state,
+                                                     bool isIsolated) {
   return mlirBytecodeSuccess();
 }
 
