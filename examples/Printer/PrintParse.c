@@ -483,7 +483,10 @@ mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOpHandle name,
   opState->loc = loc;
   opState->attrDict.id = kMlirBytecodeHandleSentinel;
   opState->hasRegions = false;
+  opState->isIsolated = false;
   opState->resultTypes = (MlirBytecodeStream){.start = 0, .pos = 0, .end = 0};
+  opState->operands= (MlirBytecodeStream){.start = 0, .pos = 0, .end = 0};
+
   return mlirBytecodeSuccess();
 }
 
