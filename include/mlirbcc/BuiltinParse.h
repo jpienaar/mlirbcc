@@ -21,7 +21,6 @@
 extern "C" {
 #endif
 
-
 // Entry point for Builtin dialect Attribute parsing.
 MlirBytecodeStatus
 mlirBytecodeParseBuiltinAttr(void *state, MlirBytecodeDialectHandle dialectHdl,

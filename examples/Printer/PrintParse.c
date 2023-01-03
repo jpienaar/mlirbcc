@@ -594,7 +594,7 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
     if (!first)
       printf(", ");
 
-    printf("%%%d", ssaIdStack[depth]++);
+    printf("> %%%d", ssaIdStack[depth]++);
     first = false;
   }
   if (!first)

@@ -1058,7 +1058,8 @@ static MlirBytecodeStatus mbci_parseRegion(MlirBytecodeStream *pp,
   uint64_t numValues;
   if (mlirBytecodeFailed(mbci_parseVarInt(pp, &numValues)))
     return mlirBytecodeEmitError("invalid/missing number of values in region");
-  mlirBytecodeEmitDebug("numBlocks = %d numValues = %d", numBlocksRemaining, numValues);
+  mlirBytecodeEmitDebug("numBlocks = %d numValues = %d", numBlocksRemaining,
+                        numValues);
 
   return mlirBytecodeRegionEnter(state, top->numBlocksRemaining, numValues,
                                  &top->op);
