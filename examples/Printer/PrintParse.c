@@ -121,7 +121,7 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLoc(
                "FileLineColLoc(%.*s:%" PRId64 ":%" PRId64 ")", (int)str.length,
                str.data, line, col);
 
-  mlirBytecodeEmitDebug("%s\n", attributes[attrHandle.id].data);
+  mlirBytecodeEmitDebug("%s", attributes[attrHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -135,7 +135,7 @@ mlirBytecodeCreateBuiltinUnknownLoc(void *state,
   attributes[attrHandle.id].length =
       snprintf((char *)attributes[attrHandle.id].data, len, "UnknownLoc");
 
-  mlirBytecodeEmitDebug("%s\n", attributes[attrHandle.id].data);
+  mlirBytecodeEmitDebug("%s", attributes[attrHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -152,7 +152,7 @@ mlirBytecodeCreateBuiltinStrAttr(void *state, MlirBytecodeAttrHandle attrHandle,
       snprintf((char *)attributes[attrHandle.id].data, len, "\"%.*s\"",
                (int)str.length, str.data);
 
-  mlirBytecodeEmitDebug("%s\n", attributes[attrHandle.id].data);
+  mlirBytecodeEmitDebug("%s", attributes[attrHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -172,7 +172,7 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttrWithType(
       snprintf((char *)attributes[bcAttrHandle.id].data, len, "\"%.*s, %.*s\"",
                (int)str.length, str.data, (int)typeStr.length, typeStr.data);
 
-  mlirBytecodeEmitDebug("%s\n", attributes[bcAttrHandle.id].data);
+  mlirBytecodeEmitDebug("%s", attributes[bcAttrHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -209,7 +209,7 @@ mlirBytecodeCreateBuiltinDictionaryAttr(void *state,
       snprintf((char *)attributes[attrHandle.id].data + len, kMax - len, " }");
 
   attributes[attrHandle.id].length = len;
-  mlirBytecodeEmitDebug("%s\n", attributes[attrHandle.id].data);
+  mlirBytecodeEmitDebug("%s", attributes[attrHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -224,7 +224,7 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinIntegerAttr(
       (char *)attributes[attrHandle.id].data, kMax, "Int(%.*s, %" PRId64 ")",
       (int)types[typeHandle.id].length, types[typeHandle.id].data, value);
 
-  mlirBytecodeEmitDebug("%s\n", attributes[attrHandle.id].data);
+  mlirBytecodeEmitDebug("%s", attributes[attrHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -235,7 +235,7 @@ mlirBytecodeCreateBuiltinTypeAttr(void *bcUserState,
   (void)bcUserState;
   attributes[bcAttrHandle.id] = getType(value);
 
-  mlirBytecodeEmitDebug("%s\n", attributes[bcAttrHandle.id].data);
+  mlirBytecodeEmitDebug("%s", attributes[bcAttrHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -249,7 +249,7 @@ mlirBytecodeCreateBuiltinFloat32Type(void *state,
   types[typeHandle.id].length =
       snprintf((char *)types[typeHandle.id].data, len, "f32");
 
-  mlirBytecodeEmitDebug("%s\n", types[typeHandle.id].data);
+  mlirBytecodeEmitDebug("%s", types[typeHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -263,7 +263,7 @@ mlirBytecodeCreateBuiltinIndexType(void *state,
   types[typeHandle.id].length =
       snprintf((char *)types[typeHandle.id].data, len, "index");
 
-  mlirBytecodeEmitDebug("%s\n", types[typeHandle.id].data);
+  mlirBytecodeEmitDebug("%s", types[typeHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -285,7 +285,7 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinIntegerType(
       snprintf((char *)types[typeHandle.id].data + i, len, "i%d", width) + i +
       1;
 
-  mlirBytecodeEmitDebug("%s\n", types[typeHandle.id].data);
+  mlirBytecodeEmitDebug("%s", types[typeHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -300,7 +300,7 @@ mlirBytecodeCreateBuiltinFunctionType(void *state,
   types[typeHandle.id].length = snprintf((char *)types[typeHandle.id].data, 26,
                                          "function (...) -> (...)");
 
-  mlirBytecodeEmitDebug("%s\n", types[typeHandle.id].data);
+  mlirBytecodeEmitDebug("%s", types[typeHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -314,7 +314,7 @@ mlirBytecodeCreateBuiltinRankedTensorType(void *state,
   types[typeHandle.id].length =
       snprintf((char *)types[typeHandle.id].data, 20, "tensor<...>");
 
-  mlirBytecodeEmitDebug("%s\n", types[typeHandle.id].data);
+  mlirBytecodeEmitDebug("%s", types[typeHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
@@ -378,7 +378,7 @@ printUnknownAttrs(void *state, MlirBytecodeDialectHandle dialectHandle,
         snprintf((char *)attributes[attrHandle.id].data, len, "Custom(%.*s)",
                  (int)str.length, str.data);
 
-    mlirBytecodeEmitDebug("%.*s\n", (int)attributes[attrHandle.id].length,
+    mlirBytecodeEmitDebug("%.*s", (int)attributes[attrHandle.id].length,
                           attributes[attrHandle.id].data);
     return mlirBytecodeSuccess();
   }
@@ -413,7 +413,7 @@ printUnknownTypeDialect(void *state, MlirBytecodeDialectHandle dialectHandle,
         snprintf((char *)types[typeHandle.id].data, len, "Custom(%.*s)",
                  (int)str.length, str.data);
 
-    mlirBytecodeEmitDebug("%.*s\n", (int)types[typeHandle.id].length,
+    mlirBytecodeEmitDebug("%.*s", (int)types[typeHandle.id].length,
                           types[typeHandle.id].data);
     return mlirBytecodeSuccess();
   }
@@ -428,15 +428,13 @@ printUnknownTypeDialect(void *state, MlirBytecodeDialectHandle dialectHandle,
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus printOpDialect(void *state,
+MlirBytecodeStatus printOpDialect(void *state, MlirBytecodeOpHandle opHdl,
                                   MlirBytecodeDialectHandle dialectHandle,
-                                  MlirBytecodeOpHandle opHdl,
                                   MlirBytecodeStringHandle stringHdl) {
   (void)state;
 
-  mlirBytecodeEmitDebug("\t\tdialect[%d] :: op[%d] = %d\n",
-                        (int)dialectHandle.id, (int)opHdl.id,
-                        (int)stringHdl.id);
+  mlirBytecodeEmitDebug("\t\tdialect[%d] :: op[%d] = %d", (int)dialectHandle.id,
+                        (int)opHdl.id, (int)stringHdl.id);
   return mlirBytecodeSuccess();
 }
 
@@ -446,7 +444,7 @@ MlirBytecodeStatus printDialect(void *state,
                                 MlirBytecodeStringHandle stringHdl) {
   MlirBytecodeBytesRef dialect =
       mlirBytecodeGetStringSectionValue(state, refFile, stringHdl);
-  mlirBytecodeEmitDebug("\t\tdialect[%d/%d] = %s\n", (int)dialectHandle.id,
+  mlirBytecodeEmitDebug("\t\tdialect[%d/%d] = %s", (int)dialectHandle.id,
                         (int)total, dialect.data);
   if (dialectHandle.id < MAX_DIALECTS) {
     if (strncmp((char *)dialect.data, "builtin", dialect.length) == 0) {
@@ -485,22 +483,25 @@ mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOpHandle name,
   opState->hasRegions = false;
   opState->isIsolated = false;
   opState->resultTypes = (MlirBytecodeStream){.start = 0, .pos = 0, .end = 0};
-  opState->operands= (MlirBytecodeStream){.start = 0, .pos = 0, .end = 0};
+  opState->operands = (MlirBytecodeStream){.start = 0, .pos = 0, .end = 0};
 
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeBlockEnter(void *state,
-                                          MlirBlockArgHandleIterator *blockArgs,
-                                          size_t numOps) {
-  MlirBytecodeTypeHandle type;
-  MlirBytecodeAttrHandle loc;
+MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
+    void *callerState, MlirBytecodeStream *stream, uint64_t numBlockArgs,
+    MlirBytecodeOperationState *opState) {
   bool first = true;
   printf("%*cblock", indentSize, '_');
   indentSize += 2;
 
-  while (mlirBytecodeSucceeded(
-      mlirBytecodeGetNextBlockArgHandles(blockArgs, &type, &loc))) {
+  for (uint64_t i = 0; i < numBlockArgs; ++i) {
+    MlirBytecodeTypeHandle type;
+    MlirBytecodeAttrHandle loc;
+    if (!mlirBytecodeSucceeded(mlirBytecodeReadHandle(stream, &type)) ||
+        !mlirBytecodeSucceeded(mlirBytecodeReadHandle(stream, &loc))) {
+      return mlirBytecodeFailure();
+    }
     if (first) {
       printf("(");
     }
@@ -511,12 +512,14 @@ MlirBytecodeStatus mlirBytecodeBlockEnter(void *state,
       printf(", %%%d : %s", ssaIdStack[depth]++, getType(type).data);
     first = false;
   }
+
   if (!first)
     printf(")");
   printf(" ::\n");
 
   return mlirBytecodeSuccess();
 }
+
 MlirBytecodeStatus mlirBytecodeBlockExit(void *state,
                                          MlirBytecodeOperationState *opState) {
   indentSize -= 2;
@@ -643,29 +646,34 @@ MlirBytecodeStatus
 mlirBytecodeOperationStateAddRegions(void *callerState, uint64_t n,
                                      MlirBytecodeOperationState *opState) {
   opState->hasRegions = true;
+  mlirBytecodeEmitDebug("numRegions = %d", (int)n);
   return printOperationPrefix(callerState, opState);
 }
 
-MlirBytecodeStatus
-mlirBytecodeOperationStateAddSuccessors(void *callerState,
-                                        MlirBytecodeStream *stream, uint64_t numSuccessors,
-                                        MlirBytecodeOperationState *opState) {
-  printf("Num successors = %d\n", numSuccessors);
-  return mlirBytecodeUnhandled();
-}
-
-MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
-    void *callerState, MlirBytecodeStream *stream, uint64_t numBlocks,
+MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
+    void *callerState, MlirBytecodeStream *stream, uint64_t numSuccessors,
     MlirBytecodeOperationState *opState) {
-  // NOP in printing as in order.
+  if (numSuccessors > 0) {
+    printf("// successors");
+    for (int i = 0; i < numSuccessors; ++i) {
+      uint64_t index;
+      MlirBytecodeStatus ret = mlirBytecodeReadVarInt(stream, &index);
+      if (!mlirBytecodeSucceeded(ret))
+        return ret;
+      printf(" ^%" PRIu64, index);
+    }
+    printf("\n");
+  }
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus
 mlirBytecodeOperationStatePop(void *callerState,
                               MlirBytecodeOperationState *opState) {
-  if (!opState->hasRegions)
+  if (!opState->hasRegions) {
+    mlirBytecodeEmitDebug("operation state pop");
     return printOperationPrefix(callerState, opState);
+  }
   return mlirBytecodeSuccess();
 }
 

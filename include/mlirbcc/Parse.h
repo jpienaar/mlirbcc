@@ -693,6 +693,7 @@ mlirBytecodeParseDialectSection(void *callerState, MlirBytecodeFile *mlirFile,
       return mlirBytecodeFailure();
   }
 
+  MlirBytecodeOpHandle op = {.id = 0};
   while (!mbci_streamEmpty(&pp)) {
     uint64_t dialect, numOpNames;
     mbci_parseVarInt(&pp, &dialect);
@@ -704,7 +705,7 @@ mlirBytecodeParseDialectSection(void *callerState, MlirBytecodeFile *mlirFile,
       if (mlirBytecodeFailed(mbci_parseVarInt(&pp, &opName)))
         return mlirBytecodeEmitError("failed to parse op name");
       mlirBytecodeEmitDebug(
-          "\top[%d] = %s (%d) . %s (%d)", (int)index,
+          "\top[%d] = %s (%d) . %s (%d)", (int)op.id,
           mlirBytecodeGetStringSectionValue(
               callerState, mlirFile, (MlirBytecodeDialectHandle){.id = dialect})
               .data,
@@ -713,12 +714,13 @@ mlirBytecodeParseDialectSection(void *callerState, MlirBytecodeFile *mlirFile,
               callerState, mlirFile, (MlirBytecodeStringHandle){.id = opName})
               .data,
           opName);
-      // Associate op[dialect][j] = opName
-      if (mlirBytecodeFailed(opFn(callerState,
-                                  (MlirBytecodeDialectHandle){.id = dialect},
-                                  (MlirBytecodeOpHandle){.id = j},
-                                  (MlirBytecodeStringHandle){.id = opName})))
-        return mlirBytecodeFailure();
+      // Associate op[index] = {dialect[j], opName}
+      MlirBytecodeStatus ret =
+          opFn(callerState, op, (MlirBytecodeDialectHandle){.id = dialect},
+               (MlirBytecodeStringHandle){.id = opName});
+      if (!mlirBytecodeSucceeded(ret))
+        return ret;
+      ++op.id;
     }
   }
 
@@ -995,11 +997,23 @@ mbci_mlirIRSectionStackPush(mbci_MlirIRSectionStack *stack) {
 
 static MlirBytecodeStatus
 mbci_mlirIRSectionStackPop(mbci_MlirIRSectionStack *stack) {
-  if (stack->top == 0)
-    return mlirBytecodeEmitError("IR stack exhausted");
   --stack->top;
   return mlirBytecodeSuccess();
 }
+
+#ifdef NDEBUG
+#define MLIRBC_AFTER(EXP, OBS, NUM)
+#else
+#define MLIRBC_AFTER(EXP, OBS, NUM)                                            \
+  do {                                                                         \
+    assert(mlirBytecodeSucceeded(mlirBytecodeSkipHandles(&EXP, NUM)));         \
+    if (EXP.pos != OBS->pos) {                                                 \
+      mlirBytecodeEmitDebug("mismatch: %" PRIu64 " vs %" PRIu64 "\n", EXP.pos, \
+                            OBS->pos);                                         \
+    }                                                                          \
+    assert(EXP.pos == OBS->pos);                                               \
+  } while (false);
+#endif
 
 static MlirBytecodeStatus mbci_parseBlock(MlirBytecodeStream *pp,
                                           mbci_MlirIRSectionStack *stack,
@@ -1011,14 +1025,22 @@ static MlirBytecodeStatus mbci_parseBlock(MlirBytecodeStream *pp,
           mlirBytecodeParseVarIntWithFlag(pp, &numOpsRemaining, &hasArgs)))
     return mlirBytecodeEmitError("unable to parse block's number of args");
   top->numOpsRemaining = numOpsRemaining;
+  mlirBytecodeEmitDebug("num ops = %d and block %s", numOpsRemaining,
+                        hasArgs ? "has args" : "has no args");
 
   uint64_t numArgs = 0;
+#ifndef NDEBUG
+  MlirBytecodeStream expectedEnd = *pp;
+#endif
   if (hasArgs) {
     if (mlirBytecodeFailed(mbci_parseVarInt(pp, &numArgs)))
       return mlirBytecodeEmitError("invalid/missing number of block args");
   }
-  return mlirBytecodeOperationStateBlockPush(callerState, pp, numArgs,
-                                             &top->op);
+
+  MlirBytecodeStatus ret =
+      mlirBytecodeOperationStateBlockPush(callerState, pp, numArgs, &top->op);
+  MLIRBC_AFTER(expectedEnd, pp, 2 * numArgs + hasArgs);
+  return ret;
 }
 
 static MlirBytecodeStatus mbci_parseRegion(MlirBytecodeStream *pp,
@@ -1028,18 +1050,15 @@ static MlirBytecodeStatus mbci_parseRegion(MlirBytecodeStream *pp,
   uint64_t numBlocksRemaining;
   if (mlirBytecodeFailed(mbci_parseVarInt(pp, &numBlocksRemaining)))
     return mlirBytecodeEmitError("invalid number of blocks");
-  numBlocksRemaining = top->numBlocksRemaining;
+  top->numBlocksRemaining = numBlocksRemaining;
+  top->numOpsRemaining = mbci_MlirIRSectionStackUnset;
   if (top->numBlocksRemaining == 0)
     return mlirBytecodeSuccess();
-
-  MlirBytecodeStatus ret =
-      mlirBytecodeOperationStateAddRegions(state, numBlocksRemaining, &top->op);
-  if (!mlirBytecodeSucceeded(ret))
-    return ret;
 
   uint64_t numValues;
   if (mlirBytecodeFailed(mbci_parseVarInt(pp, &numValues)))
     return mlirBytecodeEmitError("invalid/missing number of values in region");
+  mlirBytecodeEmitDebug("numBlocks = %d numValues = %d", numBlocksRemaining, numValues);
 
   return mlirBytecodeRegionEnter(state, top->numBlocksRemaining, numValues,
                                  &top->op);
@@ -1079,7 +1098,6 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *pp,
     if (mlirBytecodeFailed(mlirBytecodeReadHandle(pp, &attrDict))) {
       return mlirBytecodeEmitError("invalid op attribute handle");
     }
-    printf("attr = %d\n", (int)attrDict.id);
     ret = mlirBytecodeOperationStateAddAttributes(callerState, attrDict,
                                                   &cur->op);
   }
@@ -1087,20 +1105,15 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *pp,
   // Parsing all the variadic sizes.
   if (encodingMask & kHasResults) {
     uint64_t numResults = 0;
-#ifndef NDEBUG
-    MlirBytecodeStream expectedEnd = *pp;
-#endif
     if (mlirBytecodeSucceeded(mbci_parseVarInt(pp, &numResults))) {
+#ifndef NDEBUG
+      MlirBytecodeStream expectedEnd = *pp;
+#endif
       ret = mlirBytecodeOperationStateAddResultTypes(callerState, pp,
                                                      numResults, &cur->op);
       if (!mlirBytecodeSucceeded(ret))
         return mlirBytecodeEmitError("invalid result type"), ret;
-
-#ifndef NDEBUG
-      assert(ret.value ==
-             mlirBytecodeSkipHandles(&expectedEnd, numResults).value);
-      assert(expectedEnd.pos == pp->pos);
-#endif
+      MLIRBC_AFTER(expectedEnd, pp, numResults);
     } else {
       return mlirBytecodeEmitError("invalid number of results");
     }
@@ -1108,20 +1121,16 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *pp,
 
   if (encodingMask & kHasOperands) {
     uint64_t numOperands = 0;
-#ifndef NDEBUG
-    MlirBytecodeStream expectedEnd = *pp;
-#endif
     if (mlirBytecodeSucceeded(mbci_parseVarInt(pp, &numOperands))) {
+#ifndef NDEBUG
+      MlirBytecodeStream expectedEnd = *pp;
+#endif
       ret = mlirBytecodeOperationStateAddOperands(callerState, pp, numOperands,
                                                   &cur->op);
       if (!mlirBytecodeSucceeded(ret))
         return mlirBytecodeEmitError("invalid operands"), ret;
 
-#ifndef NDEBUG
-      assert(ret.value ==
-             mlirBytecodeSkipHandles(&expectedEnd, numOperands).value);
-      assert(expectedEnd.pos == pp->pos);
-#endif
+      MLIRBC_AFTER(expectedEnd, pp, numOperands);
     } else {
       return mlirBytecodeEmitError("invalid number of operands");
     }
@@ -1129,20 +1138,17 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *pp,
 
   if (encodingMask & kHasSuccessors) {
     uint64_t numSuccessors = 0;
-#ifndef NDEBUG
-    MlirBytecodeStream expectedEnd = *pp;
-#endif
     if (mlirBytecodeSucceeded(mbci_parseVarInt(pp, &numSuccessors))) {
+#ifndef NDEBUG
+      MlirBytecodeStream expectedEnd = *pp;
+#endif
+
       ret = mlirBytecodeOperationStateAddSuccessors(callerState, pp,
                                                     numSuccessors, &cur->op);
       if (!mlirBytecodeSucceeded(ret))
         return mlirBytecodeEmitError("invalid successors"), ret;
 
-#ifndef NDEBUG
-      assert(ret.value ==
-             mlirBytecodeSkipHandles(&expectedEnd, numSuccessors).value);
-      assert(expectedEnd.pos == pp->pos);
-#endif
+      MLIRBC_AFTER(expectedEnd, pp, numSuccessors);
     } else {
       return mlirBytecodeEmitError("invalid number of successors");
     }
@@ -1155,20 +1161,22 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *pp,
             pp, &numRegions, &isIsolatedFromAbove))) {
       return mlirBytecodeEmitError("invalid number of regions");
     }
+    cur->numRegionsRemaining = numRegions;
+    cur->isIsolatedFromAbove = isIsolatedFromAbove;
     ret =
         mlirBytecodeOperationStateAddRegions(callerState, numRegions, &cur->op);
     if (!mlirBytecodeSucceeded(ret))
       return ret;
-    cur->numRegionsRemaining = numRegions;
-    ret = mbci_mlirIRSectionStackPush(stack);
-    return mlirBytecodeSuccess();
+    return mbci_mlirIRSectionStackPush(stack);
   }
 
   // Completed parsing of op.
   ret = mlirBytecodeOperationStatePop(callerState, &cur->op);
   if (!mlirBytecodeSucceeded(ret))
     return ret;
-  --cur->numOpsRemaining;
+  // `cur` is the scratchpad for parsing op without region while `top` is where
+  // it is being parsed.
+  --mbci_getStackTop(stack)->numOpsRemaining;
   return ret;
 }
 
@@ -1197,6 +1205,7 @@ MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
     MlirBytecodeStatus ret;
     bool next = false;
     if (top->numOpsRemaining == 0) {
+      mlirBytecodeEmitDebug("no ops remaining in block");
       ret = mlirBytecodeBlockExit(callerState, &top->op);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
@@ -1206,6 +1215,7 @@ MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
       next = true;
     }
     if (top->numBlocksRemaining == 0) {
+      mlirBytecodeEmitDebug("no blocks remaining in region");
       ret = mlirBytecodeRegionExit(callerState, &top->op);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
@@ -1215,35 +1225,40 @@ MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
       next = true;
     }
     if (top->numRegionsRemaining == 0) {
+      mlirBytecodeEmitDebug("no regions remaining in op");
       ret = mlirBytecodeOperationStatePop(callerState, &top->op);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
 
-      // Complete parsing of op.
-      ret = mlirBytecodeOperationStatePop(callerState, &top->op);
-      if (!mlirBytecodeSucceeded(ret))
-        return ret;
-      --top->numOpsRemaining;
       mbci_mlirIRSectionStackPop(&stack);
+      --mbci_getStackTop(&stack)->numOpsRemaining;
       next = true;
     }
     if (next)
       continue;
 
-    if (top->numBlocksRemaining == mbci_MlirIRSectionStackUnset) {
+    if (top->numBlocksRemaining == (uint16_t)mbci_MlirIRSectionStackUnset) {
+      mlirBytecodeEmitDebug("starting region parsing");
       ret = mbci_parseRegion(&pp, &stack, callerState);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
+      continue;
     }
-    if (top->numOpsRemaining == mbci_MlirIRSectionStackUnset) {
+    if (top->numOpsRemaining == (uint32_t)mbci_MlirIRSectionStackUnset) {
+      mlirBytecodeEmitDebug("starting block parsing");
       ret = mbci_parseBlock(&pp, &stack, callerState);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
-    } else {
-      ret = mbci_parseOperation(&pp, &stack, callerState);
-      if (!mlirBytecodeSucceeded(ret))
-        return ret;
+      continue;
     }
+    mlirBytecodeEmitDebug(
+        "parsing operation (remaining regions: %d blocks: %d ops: %d)",
+        (int)mbci_getStackTop(&stack)->numRegionsRemaining,
+        (int)mbci_getStackTop(&stack)->numBlocksRemaining,
+        (int)mbci_getStackTop(&stack)->numOpsRemaining);
+    ret = mbci_parseOperation(&pp, &stack, callerState);
+    if (!mlirBytecodeSucceeded(ret))
+      return ret;
   }
   return mlirBytecodeSuccess();
 }
