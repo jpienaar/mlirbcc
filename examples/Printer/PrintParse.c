@@ -78,11 +78,12 @@ MlirMutableBytesRef *strings = 0;
 MlirMutableBytesRef *types = 0;
 
 int ssaIdStack[10];
+int regionNumValues[10];
 int depth;
 
 static MlirMutableBytesRef getAttribute(MlirBytecodeAttrHandle attr) {
   static char empty[] = "<<unknown >>";
-  if (!mlirBytecodeIsSentinel(attr) && attributes && attributes[attr.id].length)
+  if (attributes && attributes[attr.id].length)
     return attributes[attr.id];
   mlirBytecodeEmitDebug("unknown attribute %d", (int)attr.id);
   return (MlirMutableBytesRef){.data = (uint8_t *)&empty[0],
@@ -363,7 +364,7 @@ printUnknownAttrs(void *state, MlirBytecodeDialectHandle dialectHandle,
     memset(attributes, 0, total * sizeof(*attributes));
   }
 
-  if (!mlirBytecodeIsSentinel(attrHandle) && attributes[attrHandle.id].length) {
+  if ( attributes[attrHandle.id].length) {
     return mlirBytecodeSuccess();
   }
 
@@ -403,7 +404,7 @@ printUnknownTypeDialect(void *state, MlirBytecodeDialectHandle dialectHandle,
   if (types[typeHandle.id].length)
     return mlirBytecodeSuccess();
 
-  mlirBytecodeEmitDebug("\t\tdialect[%d] :: type[%d/%d] ",
+  mlirBytecodeEmitDebug("\t\tdialect[%d] :: type[%d/%d]",
                         (int)dialectHandle.id, (int)typeHandle.id, (int)total);
 
   if (!hasCustom) {
@@ -473,6 +474,15 @@ MlirBytecodeStatus printStrings(void *state, MlirBytecodeStringHandle hdl,
 
 static int indentSize;
 
+enum {
+  /// Sentinel to indicate unset/unknown handle.
+  kMlirBytecodeHandleSentinel = -1,
+};
+static bool hasAttrDict(MlirBytecodeAttrHandle attr) {
+  return attr.id == (uint64_t)kMlirBytecodeHandleSentinel;
+}
+
+
 MlirBytecodeStatus
 mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOpHandle name,
                                MlirBytecodeLocHandle loc,
@@ -492,7 +502,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
     void *callerState, MlirBytecodeStream *stream, uint64_t numBlockArgs,
     MlirBytecodeOperationState *opState) {
   bool first = true;
-  printf("%*cblock", indentSize, '_');
+  printf("%*cblock [%d]", indentSize, '_', depth);
   indentSize += 2;
 
   for (uint64_t i = 0; i < numBlockArgs; ++i) {
@@ -531,13 +541,17 @@ mlirBytecodeRegionEnter(void *state, size_t numBlocks, size_t numValues,
                         MlirBytecodeOperationState *opState) {
   if (opState->isIsolated)
     ssaIdStack[++depth] = 0;
+  else {
+    ssaIdStack[depth + 1] = (depth > 1 ? ssaIdStack[depth - 1] : 0) + regionNumValues[depth];
+    ++depth;
+  }
+  regionNumValues[depth] = numValues;
   indentSize += 2;
   return mlirBytecodeSuccess();
 }
 MlirBytecodeStatus mlirBytecodeRegionExit(void *state,
                                           MlirBytecodeOperationState *opState) {
-  if (opState->isIsolated)
-    --depth;
+  --depth;
   indentSize -= 2;
   return mlirBytecodeSuccess();
 }
@@ -603,7 +617,7 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
   printf("%.*s.%.*s", (int)dialectName.length, dialectName.data,
          (int)opName.length, opName.data);
 
-  if (!mlirBytecodeIsSentinel(opState->attrDict)) {
+  if (!hasAttrDict(opState->attrDict)) {
     MlirMutableBytesRef attrDictVal = getAttribute(opState->attrDict);
     printf(" %.*s ", (int)attrDictVal.length, attrDictVal.data);
   }
@@ -670,10 +684,9 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
 MlirBytecodeStatus
 mlirBytecodeOperationStatePop(void *callerState,
                               MlirBytecodeOperationState *opState) {
-  if (!opState->hasRegions) {
-    mlirBytecodeEmitDebug("operation state pop");
+  mlirBytecodeEmitDebug("operation state pop");
+  if (!opState->hasRegions)
     return printOperationPrefix(callerState, opState);
-  }
   return mlirBytecodeSuccess();
 }
 
@@ -745,6 +758,7 @@ int main(int argc, char **argv) {
   types = 0;
   strings = 0;
   ssaIdStack[0] = 0;
+  regionNumValues[0] = 0;
   depth = 0;
   bool populated = !mlirBytecodeFileEmpty(&mlirFile);
   if (!populated)
@@ -768,8 +782,8 @@ int main(int argc, char **argv) {
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse attr/type"), 1;
   }
 
-  // FIXME: Should be just lazily parsed. Here just doing effectively a local
-  // fixed point.
+  // FIXME: Should be just lazily parsed. Here just doing a few reparsed
+  // (attempt for fix point).
   fprintf(stderr, "Re-parsing attributes & types\n");
   for (int i = 0; i < 3; ++i) {
     fprintf(stderr, "\tparse %d:\n", i);
@@ -793,17 +807,18 @@ int main(int argc, char **argv) {
 
   printf("\n-------\n");
 
+  // All wrapped up together.
 #if 0
   if (mlirBytecodeFailed(mlirBytecodeParseFile(
-          ref, NULL, &printUnknownAttrs, &printUnknownTypeDialect, &printDialect,
-          &printOpDialect, &blockEnterFn, &blockExitFn, &opFn, &opExitFn,
-          &regionEnterFn, &regionExitFn, &printResourceDialect, &printStrings)))
+          NULL, ref,&printUnknownAttrs, &printUnknownTypeDialect, &printDialect,
+          &printOpDialect,
+          &printResourceDialect, &printStrings)))
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse file"), 1;
 
   if (mlirBytecodeFailed(mlirBytecodeParseFile(
-          ref, NULL, &printUnknownAttrs, &printUnknownTypeDialect, &printDialect,
-          &printOpDialect, &blockEnterFn, &blockExitFn, &opFn, &opExitFn,
-          &regionEnterFn, &regionExitFn, &printResourceDialect, &printStrings)))
+           NULL, ref,&printUnknownAttrs, &printUnknownTypeDialect, &printDialect,
+          &printOpDialect,
+          &printResourceDialect, &printStrings)))
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse file"), 1;
 #endif
 

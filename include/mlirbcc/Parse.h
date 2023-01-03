@@ -118,11 +118,6 @@ mlirBytecodeRegionExit(void *callerState, MlirBytecodeOperationState *);
 //===----------------------------------------------------------------------===//
 // Section parsing entry points.
 
-/// Associate dialect and opname with string handle.
-typedef MlirBytecodeStatus (*MlirBytecodeDialectOpCallBack)(
-    void *, MlirBytecodeDialectHandle, MlirBytecodeOpHandle,
-    MlirBytecodeStringHandle);
-
 /// Associate dialect attribute with range in memory.
 typedef MlirBytecodeStatus (*MlirBytecodeAttrCallBack)(
     void *, MlirBytecodeDialectHandle, MlirBytecodeAttrHandle, size_t /*total*/,
@@ -132,19 +127,6 @@ typedef MlirBytecodeStatus (*MlirBytecodeAttrCallBack)(
 typedef MlirBytecodeStatus (*MlirBytecodeTypeCallBack)(
     void *, MlirBytecodeDialectHandle, MlirBytecodeTypeHandle, size_t /*total*/,
     bool, MlirBytecodeBytesRef);
-
-/// Associate groupKey[resourceKey] with either MlirBytecodeStatus, string or
-/// blob.
-typedef MlirBytecodeStatus (*MlirBytecodeResourceCallBack)(
-    void *, MlirBytecodeStringHandle groupKey, MlirBytecodeSize totalGroups,
-    MlirBytecodeStringHandle resourceKey, MlirBytecodeAsmResourceEntryKind,
-    const MlirBytecodeBytesRef *blob, const uint8_t *MlirBytecodeStatusResource,
-    const MlirBytecodeStringHandle *);
-
-/// String callback which consists of string handle, total number of strings in
-/// string section and bytes corresponding to the string.
-typedef MlirBytecodeStatus (*MlirBytecodeStringCallBack)(
-    void *, MlirBytecodeStringHandle, size_t /*total*/, MlirBytecodeBytesRef);
 
 /// Iterators over attributes and types, calling MlirBytecodeAttrCallBack and
 /// MlirBytecodeTypeCallBack upon encountering Attribute or Type respectively.
@@ -156,6 +138,11 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeForEachAttributeAndType(
 /// Associate dialect with string handle.
 typedef MlirBytecodeStatus (*MlirBytecodeDialectCallBack)(
     void *, MlirBytecodeDialectHandle, size_t /*total*/,
+    MlirBytecodeStringHandle);
+
+/// Associate dialect and opname with string handle.
+typedef MlirBytecodeStatus (*MlirBytecodeDialectOpCallBack)(
+    void *, MlirBytecodeDialectHandle, MlirBytecodeOpHandle,
     MlirBytecodeStringHandle);
 
 /// Parses the dialect section, invoking MlirBytecodeDialectCallBack upon
@@ -177,11 +164,24 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeParseDialectSection(
 MLIRBC_DEF MlirBytecodeStatus
 mlirBytecodeParseIRSection(void *callerState, MlirBytecodeFile *mlirFile);
 
+/// Associate groupKey[resourceKey] with either MlirBytecodeStatus, string or
+/// blob.
+typedef MlirBytecodeStatus (*MlirBytecodeResourceCallBack)(
+    void *, MlirBytecodeStringHandle groupKey, MlirBytecodeSize totalGroups,
+    MlirBytecodeStringHandle resourceKey, MlirBytecodeAsmResourceEntryKind,
+    const MlirBytecodeBytesRef *blob, const uint8_t *MlirBytecodeStatusResource,
+    const MlirBytecodeStringHandle *);
+
 /// Parse the resource section, calling MlirBytecodeResourceCallBack upon
 /// resources encountered. Returns whether failed.
 MLIRBC_DEF MlirBytecodeStatus
 mlirBytecodeForEachResource(void *callerState, MlirBytecodeFile *mlirFile,
                             MlirBytecodeResourceCallBack fn);
+
+/// String callback which consists of string handle, total number of strings in
+/// string section and bytes corresponding to the string.
+typedef MlirBytecodeStatus (*MlirBytecodeStringCallBack)(
+    void *, MlirBytecodeStringHandle, size_t /*total*/, MlirBytecodeBytesRef);
 
 /// Invoke the callback per string in string section.
 /// Returns whether failed.
@@ -210,9 +210,6 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeParseFile(
 
 /// Returns whether the given MlirBytecodeFile structure is empty.
 MLIRBC_DEF bool mlirBytecodeFileEmpty(MlirBytecodeFile *file);
-
-/// Returns whether the given attribute is the sentinel value.
-MLIRBC_DEF bool mlirBytecodeIsSentinel(MlirBytecodeAttrHandle attr);
 
 //===----------------------------------------------------------------------===//
 // Dialect parsing utility methods.
@@ -928,10 +925,6 @@ mlirBytecodeForEachResource(void *callerState, MlirBytecodeFile *const mlirFile,
   return mlirBytecodeSuccess();
 }
 
-bool mlirBytecodeIsSentinel(MlirBytecodeAttrHandle attr) {
-  return attr.id == (uint64_t)kMlirBytecodeHandleSentinel;
-}
-
 // TODO: Add option to dynamically allocate.
 // Reserve top most for in-process op construction with or without regions.
 const int mbci_MlirIRSectionStackMaxDepth = 16 - 1;
@@ -1284,7 +1277,7 @@ MlirBytecodeFile mlirBytecodePopulateFile(const MlirBytecodeBytesRef bytes) {
   if (mlirBytecodeFailed(mbci_parseVarInt(&pp, &ret.version)) ||
       mlirBytecodeFailed(mlirBytecodeParseNullTerminatedString(&pp, &producer)))
     return mlirBytecodeEmitError("invalid version or producer"), ret;
-  mlirBytecodeEmitDebug("Producer: %s\n", producer.data);
+  mlirBytecodeEmitDebug("Bytecode producer: %s\n", producer.data);
 
   while (!mbci_streamEmpty(&pp)) {
     // Read the next section from the bytecode.

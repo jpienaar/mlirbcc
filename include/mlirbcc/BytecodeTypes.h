@@ -20,6 +20,10 @@ extern "C" {
 #endif
 
 // Handles for the different types.
+// Note: These should probably all be explicit structs to go beyond compiler
+// warnings and to errors. Currently this isn't done as the type is mostly used
+// for documentation, warnings help and avoids needing multiple variant of the
+// same read function.
 typedef struct {
   uint64_t id;
 } MlirBytecodeHandle;
@@ -83,11 +87,6 @@ enum MlirBytecodeAsmResourceEntryKind {
   kMlirBytecodeResourceEntryString,
 };
 typedef enum MlirBytecodeAsmResourceEntryKind MlirBytecodeAsmResourceEntryKind;
-
-enum {
-  /// Sentinel to indicate unset/unknown handle.
-  kMlirBytecodeHandleSentinel = -1,
-};
 
 #ifdef __cplusplus
 }
