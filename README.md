@@ -29,17 +29,6 @@ will be moved to LLVM repo per normal upstream processes.
    (if desirable[^1]) their own in-memory structure. MLIR already has an in-memory
    structure but it need not be used/is an example of reader implementation.
 
-3. Header C library
-
-   Reason: The structure of the parsing follows a `push`/`pop` structure, where
-   `push` creates a variable which `pop` populates. Where this refers to the
-   parsing structure rather than stack: `pop` may be returning a
-   pointer to an in-memory block which gets populated rather than a stack
-   variable. And coming back to the previous point, the parser shouldn't need to
-   know/dictate all the types. This configurability and extension is easier/more
-   directly obvious with a header library where compiling together with
-   extension points defined.
-
 4. Allow partial parsing/early aborts
 
    Reason: Applications where one needs more "raw" interactions with the IR
