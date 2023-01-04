@@ -1,4 +1,4 @@
-//===-- BuiltinParse.h - C parser driver for Builtin dialect ------*- C -*-===//
+//===-- BuiltinParse.c.inc - Builtin attr & type parsers ----------*- C -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM
 // Exceptions.
@@ -6,17 +6,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// Builtin dialect Attribute & Type driver.
+// Builtin Attribute & Type driver.
 //===----------------------------------------------------------------------===//
 
-// The implementation of the dialect parsing is expanded if
-//   #define MLIRBC_PARSE_IMPLEMENTATION
-// or
-//   #define MLIRBC_BUILTIN_PARSE_IMPLEMENTATION
-// is set before including this file.
+#include <stdint.h>
 
-#ifndef MLIRBC_BUILTIN_PARSE
-#define MLIRBC_BUILTIN_PARSE
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -152,11 +146,6 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLocAttr(
 #ifdef __cplusplus
 }
 #endif
-#endif // MLIRBC_BUILTIN_PARSE
-
-#if defined(MLIRBC_PARSE_IMPLEMENTATION) ||                                    \
-    defined(MLIRBC_MLIRBC_BUILTIN_PARSE_IMPLEMENTATION)
-#include <inttypes.h>
 
 enum AttributeCode {
   ///   ArrayAttr {
@@ -465,7 +454,7 @@ mlirBytecodeGetNextDictionaryHandles(MlirDictionaryHandleIterator *iterator,
 static MlirBytecodeStatus parseDictionaryAttr(void *state,
                                               MlirBytecodeAttrHandle attrHandle,
                                               MlirBytecodeStream *pp) {
-  MlirBytecodeSize size;
+  uint64_t size;
   if (mlirBytecodeFailed(mlirBytecodeParseVarInt(pp, &size)))
     return mlirBytecodeFailure();
   MlirDictionaryHandleIterator iterator = {.stream = *pp, .count = size};
@@ -627,6 +616,3 @@ mlirBytecodeParseBuiltinType(void *state, MlirBytecodeTypeHandle typeHandle,
 
   return mlirBytecodeSuccess();
 }
-
-#endif // MLIRBC_PARSE_IMPLEMENTATION or
-       // MLIRBC_MLIRBC_BUILTIN_PARSE_IMPLEMENTATION

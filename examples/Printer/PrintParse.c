@@ -23,7 +23,18 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "mlirbcc/BytecodeTypes.h"
+#define MLIRBC_PARSE_IMPLEMENTATION
+#include "mlirbcc/Parse.c.inc"
+// Dialects.
+#include "mlirbcc/BuiltinParse.c.inc"
+
+// Example that prints as one parses. Note: these are not sufficient as one
+// effectively needs to be able to lazily decode: ops can have attributes,
+// attributes can have types, and the parsing of attribute or type can depend on
+// a parsed attribute or type. But this is more of an example.
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 
 // Define struct that captures operation state during parsing.
 struct MlirBytecodeOperationState {
@@ -36,19 +47,6 @@ struct MlirBytecodeOperationState {
   bool hasRegions;
 };
 typedef struct MlirBytecodeOperationState MlirBytecodeOperationState;
-
-#define MLIRBC_PARSE_IMPLEMENTATION
-#include "mlirbcc/Parse.h"
-// Dialects.
-#include "mlirbcc/BuiltinParse.h"
-
-// Example that prints as one parses. Note: these are not sufficient as one
-// effectively needs to be able to lazily decode: ops can have attributes,
-// attributes can have types, and the parsing of attribute or type can depend on
-// a parsed attribute or type. But this is more of an example.
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
 
 typedef struct MlirMutableBytesRef MlirMutableBytesRef;
 typedef MlirMutableBytesRef MlirBytecodeAttribute;

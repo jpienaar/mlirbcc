@@ -1,4 +1,4 @@
-//===-- Parse.h - MLIR bytecode C parser --------------------------*- C -*-===//
+//===-- Parse.c.inc - MLIR bytecode C parser ----------------------*- C -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM
 // Exceptions.
@@ -6,11 +6,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// C API for MLIR bytecode event-driven parser.
+// MLIR C bytecode event-driven parser.
 //===----------------------------------------------------------------------===//
 
 // This file contains the full implementation for an event-based MLIR bytecode
-// parser. It is defined as a pure header-based implementation. To use:
+// parser. It is defined as a pure include-only implementation. To use:
 //
 //   #define MLIRBC_PARSE_IMPLEMENTATION
 //   #include "mlirbcc/Parse.h"
@@ -31,32 +31,27 @@
 // mbci_. But there is more to do to differentiate between internal and
 // user-facing methods.
 
-#ifndef MLIRBC_PARSE_H
-#define MLIRBC_PARSE_H
-
 #include "mlirbcc/BytecodeTypes.h"
-#include "mlirbcc/Log.h"
-#include "mlirbcc/Status.h"
 
 #include <assert.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-// Indicates functions users
-#define MLIRBC_DEF extern
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // - Configs
-#define MlirIRSectionStackMaxDepth 15  // TODO: add dynamic option.
+#define MlirIRSectionStackMaxDepth 15 // TODO: add dynamic option.
+
+typedef struct MlirBytecodeStatus MlirBytecodeStatus;
 
 //===----------------------------------------------------------------------===//
-// Functions required:
-// - Functions
+// Functions required to be defined:
+#define MLIRBC_DEF static
 
 /// Called when creating variable to populate operation state in.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePush(
@@ -294,13 +289,79 @@ mlirBytecodeGetOpName(void *callerState, const MlirBytecodeFile *mlirFile,
 #ifdef __cplusplus
 }
 #endif
-#endif // MLIRBC_PARSE_H
 
-#ifdef MLIRBC_PARSE_IMPLEMENTATION
-#include <assert.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
+/// Helper function to emit error and return failure status.
+extern MlirBytecodeStatus mlirBytecodeEmitErrorImpl(const char *fmt, ...);
+
+/// Helper function to emit debugging info.
+extern void mlirBytecodeEmitDebugImpl(const char *file, int line,
+                                      const char *fmt, ...);
+
+// Macros to allow capturing file and line from which invoked.
+#define mlirBytecodeEmitDebug(...)                                             \
+  mlirBytecodeEmitDebugImpl(__FILE__, __LINE__, __VA_ARGS__)
+
+#ifdef MLIRBC_VERBOSE_ERROR
+#define mlirBytecodeEmitError(...) mlirBytecodeEmitErrorImpl(__VA_ARGS__)
+#else
+#define mlirBytecodeEmitError(...) mlirBytecodeFailure()
+#endif
+
+//===----------------------------------------------------------------------===//
+// MlirBytecodeStatus.
+//===----------------------------------------------------------------------===//
+
+// Value representing the status of parsing. Status is either a success, failure
+// unhandled or interrupted. Instances of MlirBytecodeStatus must only be
+// inspected using the associated functions.
+struct MlirBytecodeStatus {
+  int8_t value;
+};
+typedef struct MlirBytecodeStatus MlirBytecodeStatus;
+
+/// Creates a status representing a success.
+inline static MlirBytecodeStatus mlirBytecodeSuccess() {
+  MlirBytecodeStatus res = {1};
+  return res;
+}
+
+/// Creates a status representing a failure.
+inline static MlirBytecodeStatus mlirBytecodeFailure() {
+  MlirBytecodeStatus res = {0};
+  return res;
+}
+
+/// Creates a status representing an unhandled case.
+inline static MlirBytecodeStatus mlirBytecodeUnhandled() {
+  MlirBytecodeStatus res = {2};
+  return res;
+}
+
+/// Creates a status representing an interrupted iteration.
+inline static MlirBytecodeStatus mlirBytecodeIterationInterrupt() {
+  MlirBytecodeStatus res = {3};
+  return res;
+}
+
+/// Checks if the given status represents a success.
+inline static bool mlirBytecodeSucceeded(MlirBytecodeStatus res) {
+  return res.value == mlirBytecodeSuccess().value;
+}
+
+/// Checks if the given status represents a failure.
+inline static bool mlirBytecodeFailed(MlirBytecodeStatus res) {
+  return res.value == mlirBytecodeFailure().value;
+}
+
+/// Checks if the given status represents a failure.
+inline static bool mlirBytecodeInterrupted(MlirBytecodeStatus res) {
+  return res.value == mlirBytecodeIterationInterrupt().value;
+}
+
+/// Checks if the given status represents a handled state.
+inline static bool mlirBytecodeHandled(MlirBytecodeStatus res) {
+  return mlirBytecodeSucceeded(res) || mlirBytecodeFailed(res);
+}
 
 // ----
 // Bytecode constants.
@@ -375,7 +436,7 @@ static bool mbci_isSectionOptional(int id) {
 //===----------------------------------------------------------------------===//
 // Default implementations for verbose logging and debugging
 #ifdef MLIRBC_VERBOSE_ERROR
-__attribute__((weak)) MlirBytecodeStatus
+MlirBytecodeStatus
 mlirBytecodeEmitErrorImpl(const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
@@ -386,7 +447,7 @@ mlirBytecodeEmitErrorImpl(const char *fmt, ...) {
   return mlirBytecodeFailure();
 }
 #else
-__attribute__((weak)) MlirBytecodeStatus
+MlirBytecodeStatus
 mlirBytecodeEmitErrorImpl(const char *fmt, ...) {
   (void)fmt;
   return mlirBytecodeFailure();
@@ -394,7 +455,7 @@ mlirBytecodeEmitErrorImpl(const char *fmt, ...) {
 #endif
 
 #ifdef MLIRBC_DEBUG
-__attribute__((weak)) void mlirBytecodeEmitDebugImpl(const char *file, int line,
+void mlirBytecodeEmitDebugImpl(const char *file, int line,
                                                      const char *fmt, ...) {
   va_list args;
   fprintf(stderr, "%s:%d: ", file, line);
@@ -404,7 +465,7 @@ __attribute__((weak)) void mlirBytecodeEmitDebugImpl(const char *file, int line,
   fprintf(stderr, "\n");
 }
 #else
-__attribute__((weak)) void mlirBytecodeEmitDebugImpl(const char *file, int line,
+void mlirBytecodeEmitDebugImpl(const char *file, int line,
                                                      const char *fmt, ...) {
   (void)fmt;
 }
@@ -1089,7 +1150,8 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *stream,
     if (mlirBytecodeFailed(mlirBytecodeParseHandle(stream, &attrDict))) {
       return mlirBytecodeEmitError("invalid op attribute handle");
     }
-    ret = mlirBytecodeOperationStateAddAttributes(callerState, cur->op, attrDict);
+    ret =
+        mlirBytecodeOperationStateAddAttributes(callerState, cur->op, attrDict);
     if (!mlirBytecodeSucceeded(ret))
       return mlirBytecodeEmitDebug("unable to add attributes"), ret;
   }
@@ -1101,8 +1163,8 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *stream,
 #ifndef NDEBUG
       MlirBytecodeStream expectedEnd = *stream;
 #endif
-      ret = mlirBytecodeOperationStateAddResultTypes(callerState, cur->op, stream,
-                                                     numResults);
+      ret = mlirBytecodeOperationStateAddResultTypes(callerState, cur->op,
+                                                     stream, numResults);
       if (!mlirBytecodeSucceeded(ret))
         return mlirBytecodeEmitError("invalid result type"), ret;
       MLIRBC_AFTER(expectedEnd, stream, numResults);
@@ -1136,8 +1198,8 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *stream,
       MlirBytecodeStream expectedEnd = *stream;
 #endif
 
-      ret = mlirBytecodeOperationStateAddSuccessors(callerState, cur->op, stream,
-                                                    numSuccessors);
+      ret = mlirBytecodeOperationStateAddSuccessors(callerState, cur->op,
+                                                    stream, numSuccessors);
       if (!mlirBytecodeSucceeded(ret))
         return mlirBytecodeEmitError("invalid successors"), ret;
 
@@ -1349,7 +1411,7 @@ MlirBytecodeStatus mbci_iterateUntilN(void *state, MlirBytecodeStringHandle i,
   return mlirBytecodeSuccess();
 }
 
-__attribute__((weak)) MlirBytecodeBytesRef
+MlirBytecodeBytesRef
 mlirBytecodeGetStringSectionValue(void *callerState,
                                   const MlirBytecodeFile *mlirFile,
                                   MlirBytecodeStringHandle idx) {
@@ -1361,7 +1423,7 @@ mlirBytecodeGetStringSectionValue(void *callerState,
   return ret;
 }
 
-__attribute__((weak)) MlirBytecodeOpRef
+MlirBytecodeOpRef
 mlirBytecodeGetOpName(void *callerState, const MlirBytecodeFile *mlirFile,
                       MlirBytecodeOpHandle hdl) {
   const MlirBytecodeBytesRef dialectSection =
@@ -1399,5 +1461,3 @@ mlirBytecodeGetOpName(void *callerState, const MlirBytecodeFile *mlirFile,
   mlirBytecodeEmitError("unable to find references string %ld", hdl);
   return ret;
 }
-
-#endif // MLIRBC_PARSE_IMPLEMENTATION
