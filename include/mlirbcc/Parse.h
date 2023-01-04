@@ -12,8 +12,6 @@
 // This file contains the full implementation for an event-based MLIR bytecode
 // parser. It is defined as a pure header-based implementation. To use:
 //
-//   // Define MlirBytecodeOperationState that is kept on stack during parsing
-//   // operation with regions.
 //   #define MLIRBC_PARSE_IMPLEMENTATION
 //   #include "mlirbcc/Parse.h"
 //   // Include dialect specific parsing extensions with required types.
@@ -53,30 +51,26 @@
 extern "C" {
 #endif
 
-typedef struct MlirBytecodeHandleRange MlirBytecodeHandleRange;
+// - Configs
+#define MlirIRSectionStackMaxDepth 15  // TODO: add dynamic option.
 
 //===----------------------------------------------------------------------===//
-// Functions and types required:
-// - Types
-//      MlirBytecodeOperationState;
-
-// - Configs
-//      MlirIRSectionStackMaxDepth // TODO: Add dynamic option
-
+// Functions required:
 // - Functions
 
 /// Called when creating variable to populate operation state in.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePush(
     void *callerState, MlirBytecodeOpHandle name, MlirBytecodeLocHandle loc,
-    MlirBytecodeOperationState *opState);
+    MlirBytecodeOperationStateHandle *opState);
 
 /// Called when finalizing population of operation state.
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeOperationStatePop(void *callerState, MlirBytecodeOperationState *);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePop(
+    void *callerState, MlirBytecodeOperationStateHandle);
 
 /// Called for an operation with attributes.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddAttributes(
-    void *callerState, MlirBytecodeAttrHandle, MlirBytecodeOperationState *);
+    void *callerState, MlirBytecodeOperationStateHandle,
+    MlirBytecodeAttrHandle);
 
 /// Called for operation with results.
 // Note: This _requires_ that the stream is progressed post the last item before
@@ -84,46 +78,47 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddAttributes(
 // TODO: Consider making these iterators/for each functors instead of exposing
 // bytestream to avoid mishaps with progressing stream.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
-    void *callerState, MlirBytecodeStream *, uint64_t numResults,
-    MlirBytecodeOperationState *);
+    void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeStream *,
+    uint64_t numResults);
 
 /// Called for operation with operands.
 // Note: This _requires_ that the stream is progressed post the last item before
 // this function returns.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
-    void *callerState, MlirBytecodeStream *, uint64_t numOperands,
-    MlirBytecodeOperationState *);
+    void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeStream *,
+    uint64_t numOperands);
 
 /// Called for operations with regions.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
-    void *callerState, uint64_t numRegions, MlirBytecodeOperationState *);
+    void *callerState, MlirBytecodeOperationStateHandle, uint64_t numRegions);
 
 /// Called for operations with successors.
 // Note: This _requires_ that the stream is progressed post the last item before
 // this function returns.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
-    void *callerState, MlirBytecodeStream *, uint64_t numSuccessors,
-    MlirBytecodeOperationState *);
+    void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeStream *,
+    uint64_t numSuccessors);
 
 /// Called when entering a region with numBlocks blocks and numValues Values
 /// (including values due to block args).
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeRegionPush(
-    void *, size_t numBlocks, size_t numValues, MlirBytecodeOperationState *);
+MLIRBC_DEF MlirBytecodeStatus
+mlirBytecodeRegionPush(void *callerState, MlirBytecodeOperationStateHandle,
+                       size_t numBlocks, size_t numValues);
 
 /// Called when entering block.
 // Note: This _requires_ that the stream is progressed post the last item before
 // this function returns.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
-    void *callerState, MlirBytecodeStream *, uint64_t numArgs,
-    MlirBytecodeOperationState *);
+    void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeStream *,
+    uint64_t numArgs);
 
 /// Called when exiting the block.
 MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeBlockPop(void *callerState, MlirBytecodeOperationState *);
+mlirBytecodeBlockPop(void *callerState, MlirBytecodeOperationStateHandle);
 
 /// Called when exiting a region.
 MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeRegionPop(void *callerState, MlirBytecodeOperationState *);
+mlirBytecodeRegionPop(void *callerState, MlirBytecodeOperationStateHandle);
 
 /// Called to process an attribute handle and convert it into an attribute.
 /// This may result in triggering additional parsing and processing of
@@ -424,15 +419,16 @@ static bool mbci_streamEmpty(MlirBytecodeStream *stream) {
   return stream->pos >= stream->end;
 }
 
-static MlirBytecodeStatus mbci_parseByte(MlirBytecodeStream *stream, uint8_t *val) {
+static MlirBytecodeStatus mbci_parseByte(MlirBytecodeStream *stream,
+                                         uint8_t *val) {
   if (mbci_streamEmpty(stream))
     return mlirBytecodeFailure();
   *val = *stream->pos++;
   return mlirBytecodeSuccess();
 }
 
-static MlirBytecodeStatus mbci_parseBytes(MlirBytecodeStream *stream, uint8_t *val,
-                                          size_t n) {
+static MlirBytecodeStatus mbci_parseBytes(MlirBytecodeStream *stream,
+                                          uint8_t *val, size_t n) {
   for (uint64_t i = 0; i < n; ++i)
     if (mlirBytecodeFailed(mbci_parseByte(stream, val++)))
       return mlirBytecodeFailure();
@@ -446,7 +442,8 @@ static MlirBytecodeStatus mbci_skipBytes(MlirBytecodeStream *stream, size_t n) {
   return mlirBytecodeSuccess();
 }
 
-static MlirBytecodeStatus mbci_skipVarInts(MlirBytecodeStream *stream, size_t n) {
+static MlirBytecodeStatus mbci_skipVarInts(MlirBytecodeStream *stream,
+                                           size_t n) {
   for (size_t i = 0; i < n; ++i) {
     uint8_t head;
     if (mlirBytecodeFailed(mbci_parseByte(stream, &head)))
@@ -459,7 +456,7 @@ static MlirBytecodeStatus mbci_skipVarInts(MlirBytecodeStream *stream, size_t n)
 }
 
 MlirBytecodeStatus mlirBytecodeParseHandle(MlirBytecodeStream *stream,
-                                          MlirBytecodeAttrHandle *result) {
+                                           MlirBytecodeAttrHandle *result) {
   return mlirBytecodeParseVarInt(stream, &result->id);
 }
 
@@ -473,7 +470,7 @@ void mlirBytecodeStreamReset(MlirBytecodeStream *stream) {
 }
 
 MlirBytecodeStatus mlirBytecodeParseVarInt(MlirBytecodeStream *stream,
-                                          uint64_t *result) {
+                                           uint64_t *result) {
   // Compute the number of bytes needed to encode the value. Each byte can hold
   // up to 7-bits of data. We only check up to the number of bits we can encode
   // in the first byte (8).
@@ -516,7 +513,7 @@ MlirBytecodeStatus mlirBytecodeParseVarIntWithFlag(MlirBytecodeStream *stream,
 }
 
 MlirBytecodeStatus mlirBytecodeParseSignedVarInt(MlirBytecodeStream *stream,
-                                                int64_t *result) {
+                                                 int64_t *result) {
   if (mlirBytecodeFailed(mlirBytecodeParseVarInt(stream, (uint64_t *)result)))
     return mlirBytecodeFailure();
   *result = (*result >> 1) ^ (~(*result & 1) + 1);
@@ -585,7 +582,8 @@ MlirBytecodeStatus
 mlirBytecodeParseNullTerminatedString(MlirBytecodeStream *stream,
                                       MlirBytecodeBytesRef *str) {
   const uint8_t *startIt = (const uint8_t *)stream->pos;
-  const uint8_t *nulIt = (const uint8_t *)memchr(startIt, 0, stream->end - stream->pos);
+  const uint8_t *nulIt =
+      (const uint8_t *)memchr(startIt, 0, stream->end - stream->pos);
   if (!nulIt) {
     return mlirBytecodeEmitError(
         "malformed null-terminated string, no null character found");
@@ -935,7 +933,7 @@ enum {
 // regions:
 struct mbci_MlirIRSectionStackEntry {
   // State of parent op as currently populated.
-  MlirBytecodeOperationState op;
+  MlirBytecodeOperationStateHandle op;
 
   // Number of regions to still complete parsing.
   // Number of regions is assumed to be relatively small (<= 32767).
@@ -1029,8 +1027,8 @@ static MlirBytecodeStatus mbci_parseBlock(MlirBytecodeStream *stream,
       return mlirBytecodeEmitError("invalid/missing number of block args");
   }
 
-  MlirBytecodeStatus ret =
-      mlirBytecodeOperationStateBlockPush(callerState, stream, numArgs, &top->op);
+  MlirBytecodeStatus ret = mlirBytecodeOperationStateBlockPush(
+      callerState, top->op, stream, numArgs);
   MLIRBC_AFTER(expectedEnd, stream, 2 * numArgs + hasArgs);
   return ret;
 }
@@ -1053,8 +1051,8 @@ static MlirBytecodeStatus mbci_parseRegion(MlirBytecodeStream *stream,
   mlirBytecodeEmitDebug("numBlocks = %d numValues = %d", numBlocksRemaining,
                         numValues);
 
-  return mlirBytecodeRegionPush(state, top->numBlocksRemaining, numValues,
-                                 &top->op);
+  return mlirBytecodeRegionPush(state, top->op, top->numBlocksRemaining,
+                                numValues);
 }
 
 static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *stream,
@@ -1091,8 +1089,7 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *stream,
     if (mlirBytecodeFailed(mlirBytecodeParseHandle(stream, &attrDict))) {
       return mlirBytecodeEmitError("invalid op attribute handle");
     }
-    ret = mlirBytecodeOperationStateAddAttributes(callerState, attrDict,
-                                                  &cur->op);
+    ret = mlirBytecodeOperationStateAddAttributes(callerState, cur->op, attrDict);
     if (!mlirBytecodeSucceeded(ret))
       return mlirBytecodeEmitDebug("unable to add attributes"), ret;
   }
@@ -1104,8 +1101,8 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *stream,
 #ifndef NDEBUG
       MlirBytecodeStream expectedEnd = *stream;
 #endif
-      ret = mlirBytecodeOperationStateAddResultTypes(callerState, stream,
-                                                     numResults, &cur->op);
+      ret = mlirBytecodeOperationStateAddResultTypes(callerState, cur->op, stream,
+                                                     numResults);
       if (!mlirBytecodeSucceeded(ret))
         return mlirBytecodeEmitError("invalid result type"), ret;
       MLIRBC_AFTER(expectedEnd, stream, numResults);
@@ -1120,8 +1117,8 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *stream,
 #ifndef NDEBUG
       MlirBytecodeStream expectedEnd = *stream;
 #endif
-      ret = mlirBytecodeOperationStateAddOperands(callerState, stream, numOperands,
-                                                  &cur->op);
+      ret = mlirBytecodeOperationStateAddOperands(callerState, cur->op, stream,
+                                                  numOperands);
       if (!mlirBytecodeSucceeded(ret))
         return mlirBytecodeEmitError("invalid operands"), ret;
 
@@ -1133,13 +1130,14 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *stream,
 
   if (encodingMask & kHasSuccessors) {
     uint64_t numSuccessors = 0;
-    if (mlirBytecodeSucceeded(mlirBytecodeParseVarInt(stream, &numSuccessors))) {
+    if (mlirBytecodeSucceeded(
+            mlirBytecodeParseVarInt(stream, &numSuccessors))) {
 #ifndef NDEBUG
       MlirBytecodeStream expectedEnd = *stream;
 #endif
 
-      ret = mlirBytecodeOperationStateAddSuccessors(callerState, stream,
-                                                    numSuccessors, &cur->op);
+      ret = mlirBytecodeOperationStateAddSuccessors(callerState, cur->op, stream,
+                                                    numSuccessors);
       if (!mlirBytecodeSucceeded(ret))
         return mlirBytecodeEmitError("invalid successors"), ret;
 
@@ -1159,14 +1157,14 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *stream,
     cur->numRegionsRemaining = numRegions;
     cur->isIsolatedFromAbove = isIsolatedFromAbove;
     ret =
-        mlirBytecodeOperationStateAddRegions(callerState, numRegions, &cur->op);
+        mlirBytecodeOperationStateAddRegions(callerState, cur->op, numRegions);
     if (!mlirBytecodeSucceeded(ret))
       return ret;
     return mbci_mlirIRSectionStackPush(stack);
   }
 
   // Completed parsing of op.
-  ret = mlirBytecodeOperationStatePop(callerState, &cur->op);
+  ret = mlirBytecodeOperationStatePop(callerState, cur->op);
   if (!mlirBytecodeSucceeded(ret))
     return ret;
   // `cur` is the scratchpad for parsing op without region while `top` is where
@@ -1201,7 +1199,7 @@ MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
     bool next = false;
     if (top->numOpsRemaining == 0) {
       mlirBytecodeEmitDebug("no ops remaining in block");
-      ret = mlirBytecodeBlockPop(callerState, &top->op);
+      ret = mlirBytecodeBlockPop(callerState, top->op);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
 
@@ -1211,7 +1209,7 @@ MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
     }
     if (top->numBlocksRemaining == 0) {
       mlirBytecodeEmitDebug("no blocks remaining in region");
-      ret = mlirBytecodeRegionPop(callerState, &top->op);
+      ret = mlirBytecodeRegionPop(callerState, top->op);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
 
@@ -1221,7 +1219,7 @@ MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
     }
     if (top->numRegionsRemaining == 0) {
       mlirBytecodeEmitDebug("no regions remaining in op");
-      ret = mlirBytecodeOperationStatePop(callerState, &top->op);
+      ret = mlirBytecodeOperationStatePop(callerState, top->op);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
 
@@ -1276,7 +1274,8 @@ MlirBytecodeFile mlirBytecodePopulateFile(const MlirBytecodeBytesRef bytes) {
   // Parse the bytecode version and producer.
   MlirBytecodeBytesRef producer;
   if (mlirBytecodeFailed(mlirBytecodeParseVarInt(&stream, &ret.version)) ||
-      mlirBytecodeFailed(mlirBytecodeParseNullTerminatedString(&stream, &producer)))
+      mlirBytecodeFailed(
+          mlirBytecodeParseNullTerminatedString(&stream, &producer)))
     return mlirBytecodeEmitError("invalid version or producer"), ret;
   mlirBytecodeEmitDebug("bytecode producer: %s\n", producer.data);
 

@@ -37,8 +37,6 @@ struct MlirBytecodeOperationState {
 };
 typedef struct MlirBytecodeOperationState MlirBytecodeOperationState;
 
-#define MlirIRSectionStackMaxDepth 15
-
 #define MLIRBC_PARSE_IMPLEMENTATION
 #include "mlirbcc/Parse.h"
 // Dialects.
@@ -496,10 +494,14 @@ static bool hasAttrDict(MlirBytecodeAttrHandle attr) {
   return attr.id == (uint64_t)kMlirBytecodeHandleSentinel;
 }
 
-MlirBytecodeStatus
-mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOpHandle name,
-                               MlirBytecodeLocHandle loc,
-                               MlirBytecodeOperationState *opState) {
+MlirBytecodeOperationState states[MlirIRSectionStackMaxDepth];
+int stateDepth;
+
+MlirBytecodeStatus mlirBytecodeOperationStatePush(
+    void *callerState, MlirBytecodeOpHandle name, MlirBytecodeLocHandle loc,
+    MlirBytecodeOperationStateHandle *opStateHandle) {
+  MlirBytecodeOperationState *opState = &states[stateDepth++];
+  opStateHandle->state = (void *)opState;
   opState->name = name;
   opState->loc = loc;
   opState->attrDict.id = kMlirBytecodeHandleSentinel;
@@ -512,8 +514,8 @@ mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOpHandle name,
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
-    void *callerState, MlirBytecodeStream *stream, uint64_t numBlockArgs,
-    MlirBytecodeOperationState *opState) {
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeStream *stream, uint64_t numBlockArgs) {
   bool first = true;
   printf("%*cblock", indentSize, '_');
   indentSize += 2;
@@ -543,15 +545,18 @@ MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeBlockPop(void *callerState,
-                                         MlirBytecodeOperationState *opState) {
+MlirBytecodeStatus
+mlirBytecodeBlockPop(void *callerState,
+                     MlirBytecodeOperationStateHandle opStateHandle) {
   indentSize -= 2;
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus
-mlirBytecodeRegionPush(void *callerState, size_t numBlocks, size_t numValues,
-                        MlirBytecodeOperationState *opState) {
+mlirBytecodeRegionPush(void *callerState,
+                       MlirBytecodeOperationStateHandle opStateHandle,
+                       size_t numBlocks, size_t numValues) {
+  MlirBytecodeOperationState *opState = opStateHandle.state;
   if (opState->isIsolated)
     ssaIdStack[++depth] = 0;
   else {
@@ -563,24 +568,26 @@ mlirBytecodeRegionPush(void *callerState, size_t numBlocks, size_t numValues,
   indentSize += 2;
   return mlirBytecodeSuccess();
 }
-MlirBytecodeStatus mlirBytecodeRegionPop(void *callerState,
-                                          MlirBytecodeOperationState *opState) {
+MlirBytecodeStatus
+mlirBytecodeRegionPop(void *callerState,
+                      MlirBytecodeOperationStateHandle opStateHandle) {
   --depth;
   indentSize -= 2;
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus
-mlirBytecodeOperationStateAddAttributes(void *callerState,
-                                        MlirBytecodeAttrHandle attrs,
-                                        MlirBytecodeOperationState *opState) {
+MlirBytecodeStatus mlirBytecodeOperationStateAddAttributes(
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeAttrHandle attrs) {
+  MlirBytecodeOperationState *opState = opStateHandle.state;
   opState->attrDict = attrs;
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
-    void *callerState, MlirBytecodeStream *stream, uint64_t numResults,
-    MlirBytecodeOperationState *opState) {
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeStream *stream, uint64_t numResults) {
+  MlirBytecodeOperationState *opState = opStateHandle.state;
   opState->resultTypes.start = opState->resultTypes.pos = stream->pos;
   MlirBytecodeStatus ret = mlirBytecodeSkipHandles(stream, numResults);
   opState->resultTypes.end = stream->pos;
@@ -588,8 +595,9 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
-    void *callerState, MlirBytecodeStream *stream, uint64_t numOperands,
-    MlirBytecodeOperationState *opState) {
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeStream *stream, uint64_t numOperands) {
+  MlirBytecodeOperationState *opState = opStateHandle.state;
   opState->operands.start = opState->operands.pos = stream->pos;
   MlirBytecodeStatus ret = mlirBytecodeSkipHandles(stream, numOperands);
   opState->operands.end = stream->pos;
@@ -667,17 +675,18 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus
-mlirBytecodeOperationStateAddRegions(void *callerState, uint64_t n,
-                                     MlirBytecodeOperationState *opState) {
+MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    uint64_t n) {
+  MlirBytecodeOperationState *opState = opStateHandle.state;
   opState->hasRegions = true;
   mlirBytecodeEmitDebug("numRegions = %d", (int)n);
   return printOperationPrefix(callerState, opState);
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
-    void *callerState, MlirBytecodeStream *stream, uint64_t numSuccessors,
-    MlirBytecodeOperationState *opState) {
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeStream *stream, uint64_t numSuccessors) {
   if (numSuccessors > 0) {
     printf("// successors");
     for (uint64_t i = 0; i < numSuccessors; ++i) {
@@ -694,7 +703,8 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
 
 MlirBytecodeStatus
 mlirBytecodeOperationStatePop(void *callerState,
-                              MlirBytecodeOperationState *opState) {
+                              MlirBytecodeOperationStateHandle opStateHandle) {
+  MlirBytecodeOperationState *opState = opStateHandle.state;
   mlirBytecodeEmitDebug("operation state pop");
   if (!opState->hasRegions)
     return printOperationPrefix(callerState, opState);
