@@ -8,26 +8,26 @@
 //===----------------------------------------------------------------------===//
 //===----------------------------------------------------------------------===//
 
-#ifndef MLIRBC_RAWBYTECODETYPES_H
-#define MLIRBC_RAWBYTECODETYPES_H
+#ifndef MLIRBC_BYTECODETYPES_H
+#define MLIRBC_BYTECODETYPES_H
 
-#include <stdalign.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+typedef uint64_t MlirBytecodeSize;
+
 // Handles for the different types.
 // Note: These should probably all be explicit structs to go beyond compiler
 // warnings and to errors. Currently this isn't done as the type is mostly used
 // for documentation, warnings help and avoids needing multiple variant of the
 // same read function.
-typedef struct {
-  uint64_t id;
-} MlirBytecodeHandle;
-typedef uint64_t MlirBytecodeSize;
+struct MlirBytecodeHandle {
+  MlirBytecodeSize id;
+};
+typedef struct MlirBytecodeHandle MlirBytecodeHandle;
 typedef MlirBytecodeHandle MlirBytecodeAttrHandle;
 typedef MlirBytecodeHandle MlirBytecodeDialectHandle;
 typedef MlirBytecodeHandle MlirBytecodeOpHandle;
@@ -35,6 +35,7 @@ typedef MlirBytecodeHandle MlirBytecodeStringHandle;
 typedef MlirBytecodeHandle MlirBytecodeTypeHandle;
 typedef MlirBytecodeHandle MlirBytecodeLocHandle;
 
+// Handle to operation state.
 struct MlirBytecodeOperationStateHandle {
   void *state;
 };
@@ -80,10 +81,6 @@ struct MlirBytecodeHandleIterator {
 };
 typedef struct MlirBytecodeHandleIterator MlirBytecodeHandleIterator;
 
-typedef struct MlirBytecodeHandleIterator MlirBlockArgHandleIterator;
-typedef struct MlirBytecodeHandleIterator MlirBytecodeStringIterator;
-typedef struct MlirBytecodeHandleIterator MlirBytecodeDialectNameRange;
-
 enum MlirBytecodeAsmResourceEntryKind {
   /// A blob of data with an accompanying alignment.
   kMlirBytecodeResourceEntryBlob,
@@ -98,4 +95,4 @@ typedef enum MlirBytecodeAsmResourceEntryKind MlirBytecodeAsmResourceEntryKind;
 }
 #endif
 
-#endif // MLIRBC_RAWBYTECODETYPES_H
+#endif // MLIRBC_BYTECODETYPES_H
