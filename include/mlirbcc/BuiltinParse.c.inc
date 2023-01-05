@@ -43,9 +43,8 @@ mlirBytecodeCreateBuiltinStrAttr(void *state, MlirBytecodeAttrHandle attrHandle,
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLoc(
     void *state, MlirBytecodeAttrHandle attrHandle,
     MlirBytecodeAttrHandle filename, uint64_t line, uint64_t col);
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinUnknownLoc(void *state,
-                                    MlirBytecodeAttrHandle attrHandle);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinUnknownLoc(
+    void *state, MlirBytecodeAttrHandle attrHandle);
 
 typedef struct MlirBytecodeHandleIterator MlirDictionaryHandleIterator;
 // Populate the next key and value and increment the iterator.
@@ -54,26 +53,22 @@ MlirBytecodeStatus
 mlirBytecodeGetNextDictionaryHandles(MlirDictionaryHandleIterator *iterator,
                                      MlirBytecodeAttrHandle *name,
                                      MlirBytecodeAttrHandle *value);
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinDictionaryAttr(void *state,
-                                        MlirBytecodeAttrHandle attrHandle,
-                                        MlirDictionaryHandleIterator *range);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinDictionaryAttr(
+    void *state, MlirBytecodeAttrHandle attrHandle,
+    MlirDictionaryHandleIterator *range);
 
 // Create method for TypeAttr.
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinTypeAttr(void *bcUserState,
-                                  MlirBytecodeAttrHandle bcAttrHandle,
-                                  MlirBytecodeTypeHandle value);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinTypeAttr(
+    void *bcUserState, MlirBytecodeAttrHandle bcAttrHandle,
+    MlirBytecodeTypeHandle value);
 
 //===----------------------------------------------------------------------===//
 // Create types.
 
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinFloat32Type(void *state,
-                                     MlirBytecodeTypeHandle typeHandle);
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinIndexType(void *state,
-                                   MlirBytecodeTypeHandle typeHandle);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinFloat32Type(
+    void *state, MlirBytecodeTypeHandle typeHandle);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinIndexType(
+    void *state, MlirBytecodeTypeHandle typeHandle);
 
 enum MlirBuiltinSignednessSemantics {
   kBuiltinIntegerTypeSignless, /// No signedness semantics
@@ -87,12 +82,10 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinIntegerType(
     MlirBuiltinSignednessSemantics signedness, int width);
 
 // TODO
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinFunctionType(void *state,
-                                      MlirBytecodeTypeHandle typeHandle);
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinRankedTensorType(void *state,
-                                          MlirBytecodeTypeHandle typeHandle);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinFunctionType(
+    void *state, MlirBytecodeTypeHandle typeHandle);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinRankedTensorType(
+    void *state, MlirBytecodeTypeHandle typeHandle);
 
 //===----------------------------------------------------------------------===//
 // Query types.
@@ -102,9 +95,8 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeQueryBuiltinIntegerTypeWidth(
     void *state, MlirBytecodeTypeHandle typeHandle, unsigned *width);
 
 // Create method for UnknownLocAttr.
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinUnknownLocAttr(void *bcUserState,
-                                        MlirBytecodeAttrHandle bcAttrHandle);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinUnknownLocAttr(
+    void *bcUserState, MlirBytecodeAttrHandle bcAttrHandle);
 
 // Create method for FlatSymbolRefAttr.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinFlatSymbolRefAttr(
@@ -117,10 +109,9 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinNameLocAttr(
     MlirBytecodeAttrHandle name, MlirBytecodeAttrHandle childLoc);
 
 // Create method for StringAttr.
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinStringAttr(void *bcUserState,
-                                    MlirBytecodeAttrHandle bcAttrHandle,
-                                    MlirBytecodeStringHandle value);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttr(
+    void *bcUserState, MlirBytecodeAttrHandle bcAttrHandle,
+    MlirBytecodeStringHandle value);
 
 // Create method for StringAttrWithType.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttrWithType(
@@ -128,15 +119,13 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttrWithType(
     MlirBytecodeStringHandle value, MlirBytecodeTypeHandle type);
 
 // Create method for TypeAttr.
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinTypeAttr(void *bcUserState,
-                                  MlirBytecodeAttrHandle bcAttrHandle,
-                                  MlirBytecodeTypeHandle value);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinTypeAttr(
+    void *bcUserState, MlirBytecodeAttrHandle bcAttrHandle,
+    MlirBytecodeTypeHandle value);
 
 // Create method for UnitAttr.
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeCreateBuiltinUnitAttr(void *bcUserState,
-                                  MlirBytecodeAttrHandle bcAttrHandle);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinUnitAttr(
+    void *bcUserState, MlirBytecodeAttrHandle bcAttrHandle);
 
 // Create method for FileLineColLocAttr.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLocAttr(
@@ -587,6 +576,7 @@ parseRankedTensorType(void *state, MlirBytecodeAttrHandle typeHandle,
 MlirBytecodeStatus
 mlirBytecodeParseBuiltinType(void *state, MlirBytecodeTypeHandle typeHandle,
                              MlirBytecodeBytesRef str, bool hasCustom) {
+  mlirBytecodeEmitDebug("type str = %s %d", str.data, hasCustom);
   if (!hasCustom)
     return mlirBytecodeUnhandled();
 
