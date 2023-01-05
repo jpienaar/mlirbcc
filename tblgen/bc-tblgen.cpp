@@ -37,7 +37,7 @@ static int reportError(Twine Msg) {
 }
 
 const char licenseHeader[] =
-    R"(//===-- {0}Parse{1} - Parser driver for {0} dialect ---*- C -*-===//
+    R"(//===-- {0}.c.inc - Parser driver for {0} dialect ---*- C -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM
 // Exceptions.
@@ -47,12 +47,6 @@ const char licenseHeader[] =
 //===----------------------------------------------------------------------===//
 // {0} dialect Attribute & Type parser driver.
 //===----------------------------------------------------------------------===//
-
-// The implementation of the dialect parsing is instantiated if
-//   #define MLIRBC_PARSE_IMPLEMENTATION
-// or
-//   #define MLIRBC_{0}_PARSE_IMPLEMENTATION
-// is set before including this file.
 
 )";
 
@@ -65,7 +59,7 @@ public:
   bool init(const std::filesystem::path &mainFileRoot);
 
   // Returns whether successfully terminated output files.
-  bool fin();
+  bool fin(raw_ostream &os);
 
   // Returns whether successfully emitted attribute defs.
   bool emitParse(StringRef kind, Record &x);
@@ -75,112 +69,69 @@ public:
 
 private:
   StringRef dialectName;
-  std::unique_ptr<ToolOutputFile> dialectHeaderFile, dialectCppFile;
+  std::string topStr, bottomStr;
 };
 
 bool Generator::init(const std::filesystem::path &mainFileRoot) {
-  const std::filesystem::path incPrefix("include/mlirbcc/Dialect");
-  const std::filesystem::path cppPrefix("lib/Dialect");
-  std::vector<std::pair<std::reference_wrapper<std::unique_ptr<ToolOutputFile>>,
-                        std::filesystem::path>>
-      files = {{dialectHeaderFile, incPrefix / dialectName.str() / "Parse.h"},
-               {dialectCppFile, cppPrefix / dialectName.str() / "Parse.cpp"}};
+  {
+    // Generate top section.
+    raw_string_ostream os(topStr);
+    os << formatv(licenseHeader, dialectName);
 
-  for (auto it : files) {
-    std::error_code ec;
-    auto dir = std::get<1>(it);
-    dir.remove_filename();
-    std::filesystem::create_directories(dir, ec);
-    if (ec) {
-      return reportError("failed to create directory '" + dir.string() +
-                         "' as " + ec.message());
+    // Inject additional header include file.
+    auto incHeaderFileName =
+        mainFileRoot / formatv("{0}Inc.h", dialectName).str();
+    if (std::filesystem::exists(incHeaderFileName)) {
+      auto incFileOr =
+          MemoryBuffer::getFile(incHeaderFileName.string(), /*IsText=*/true,
+                                /*RequiresNullTerminator=*/false);
+      if (incFileOr) {
+        os << incFileOr->get()->getBuffer() << "\n";
+      } else {
+        llvm::errs() << "FAILURE: " << incFileOr.getError().message();
+        return true;
+      }
     }
 
-    std::string outputFilename = std::get<1>(it).string();
-    std::get<0>(it).get() =
-        std::make_unique<ToolOutputFile>(outputFilename, ec, sys::fs::OF_Text);
-    if (ec) {
-      return reportError("error opening " + outputFilename + ": " +
-                         ec.message() + "\n");
-    }
-    std::get<0>(it).get()->keep();
-    std::get<0>(it).get()->os()
-        << formatv(licenseHeader, dialectName, std::get<1>(it).extension());
-  }
-
-  // Emit header.
-  raw_ostream &os = dialectHeaderFile->os();
-  os << formatv(R"(
-#ifndef {0}_PARSE
-#define {0}_PARSE
-
-#include "mlirbcc/Parse.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-)",
-                dialectName.upper(), dialectName);
-
-  // Inject additional header include file.
-  auto incHeaderFileName =
-      mainFileRoot / formatv("{0}Inc.h", dialectName).str();
-  if (std::filesystem::exists(incHeaderFileName)) {
-    auto incFileOr =
-        MemoryBuffer::getFile(incHeaderFileName.string(), /*IsText=*/true,
-                              /*RequiresNullTerminator=*/false);
-    if (incFileOr) {
-      os << incFileOr->get()->getBuffer() << "\n";
-    } else {
-      llvm::errs() << "FAILURE: " << incFileOr.getError().message();
-      return true;
-    }
-  }
-
-  os << formatv(R"(
-// Entry point for {1} dialect Attribute parsing.
+    os << formatv(R"(
+// Entry point for {0} dialect Attribute parsing.
 MlirBytecodeStatus
-mlirBytecodeParse{1}Attr(void *state, MlirBytecodeDialectHandle dialectHandle,
-  MlirBytecodeAttrHandle attrHandle, size_t total, bool hasCustom,
-  MlirBytecodeBytesRef str);
+mlirBytecodeParse{0}Attr(void *state, MlirBytecodeAttrHandle attrHandle,
+                             MlirBytecodeBytesRef str, bool hasCustom);
 
-// Entry point for Builtin dialect Type parsing.
+// Entry point for {0} dialect Type parsing.
 MlirBytecodeStatus
-mlirBytecodeParse{1}Type(void *state, MlirBytecodeDialectHandle dialectHandle,
-    MlirBytecodeTypeHandle typeHandle, size_t total, bool hasCustom,
-    MlirBytecodeBytesRef str);
+mlirBytecodeParse{0}Type(void *state, MlirBytecodeTypeHandle typeHandle,
+                             MlirBytecodeBytesRef str, bool hasCustom);
 
 )",
-                dialectName.upper(), dialectName);
+                  dialectName);
+  }
 
-  dialectCppFile->os() << formatv(
-      "#include \"mlirbcc/Dialect/{0}/Parse.h\"\n\n", dialectName);
-  // Inject additional cpp include file.
-  auto incCppFileName = mainFileRoot / formatv("{0}Inc.cpp", dialectName).str();
-  if (std::filesystem::exists(incCppFileName)) {
-    auto incFileOr =
-        MemoryBuffer::getFile(incCppFileName.string(), /*IsText=*/true,
-                              /*RequiresNullTerminator=*/false);
-    if (incFileOr) {
-      dialectCppFile->os() << incFileOr->get()->getBuffer() << "\n";
-    } else {
-      llvm::errs() << "FAILURE: " << incFileOr.getError().message();
-      return true;
+  {
+    // Generate bottom section.
+    raw_string_ostream os(topStr);
+    // Inject additional cpp include file.
+    auto incCppFileName =
+        mainFileRoot / formatv("{0}Inc.cpp", dialectName).str();
+    if (std::filesystem::exists(incCppFileName)) {
+      auto incFileOr =
+          MemoryBuffer::getFile(incCppFileName.string(), /*IsText=*/true,
+                                /*RequiresNullTerminator=*/false);
+      if (incFileOr) {
+        os << incFileOr->get()->getBuffer() << "\n";
+      } else {
+        llvm::errs() << "FAILURE: " << incFileOr.getError().message();
+        return true;
+      }
     }
   }
 
   return false;
 }
 
-bool Generator::fin() {
-  raw_ostream &os = dialectHeaderFile->os();
-  os << formatv(R"(#ifdef __cplusplus
-}
-#endif
-#endif // {0}_PARSE 
-  )",
-                dialectName.upper(), dialectName);
-
+bool Generator::fin(raw_ostream &os) {
+  os << topStr << "\n" << StringRef(bottomStr).rtrim() << "\n";
   return false;
 }
 
@@ -189,7 +140,8 @@ static std::string capitalize(StringRef str) {
 }
 
 bool Generator::emitDispatch(StringRef kind, ArrayRef<Record *> vec) {
-  mlir::raw_indented_ostream os(dialectCppFile->os());
+  raw_string_ostream sos(bottomStr);
+  mlir::raw_indented_ostream os(sos);
   char const *head = R"(MlirBytecodeStatus
 mlirBytecodeParse{0}{1}(void *state, MlirBytecodeDialectHandle dialectHandle,
     MlirBytecode{1}Handle {2}Handle, size_t total, bool hasCustom,
@@ -219,7 +171,7 @@ mlirBytecodeParse{0}{1}(void *state, MlirBytecodeDialectHandle dialectHandle,
 }
 
 bool Generator::emitParse(StringRef kind, Record &attr) {
-  raw_ostream &os = dialectCppFile->os();
+  raw_string_ostream os(bottomStr);
   char const *head = R"(static MlirBytecodeStatus parse{0}(void *bcUserState,
     MlirBytecode{1}Handle bc{1}Handle, MlirBytecodeStream *bcStream) )";
   mlir::raw_indented_ostream ios(os);
@@ -309,43 +261,30 @@ bool Generator::emitParse(StringRef kind, Record &attr) {
 }
 
 bool Generator::emitCreate(StringRef kind, Record &attr) {
-  raw_ostream &headerOs = dialectHeaderFile->os();
-  raw_ostream &cppOs = dialectCppFile->os();
+  raw_string_ostream headerOs(topStr);
   DagInit *members = attr.getValueAsDag("members");
 
   // Emit extern & weak function for create.
   // - Extern is function user needs to implement;
   // - Weak linkage function is to allow partially defining them;
   headerOs << "// Create method for " << attr.getName() << ".\n";
-  headerOs << "extern ";
+  headerOs << "static ";
 
-  if (generateWeak)
-    cppOs << "__attribute__((weak)) ";
+  raw_string_ostream os(topStr);
+  os << "MlirBytecodeStatus mlirBytecodeCreate"
+     << attr.getValueAsString("dialect") << attr.getName()
+     << formatv("(void *bcUserState, MlirBytecode{0}Handle bc{0}Handle",
+                capitalize(kind));
 
-  SmallVector<ToolOutputFile *> files{dialectHeaderFile.get()};
-  if (generateWeak)
-    files.push_back(dialectCppFile.get());
-
-  for (auto *file : files) {
-    raw_ostream &os = file->os();
-    os << "MlirBytecodeStatus mlirBytecodeCreate"
-       << attr.getValueAsString("dialect") << attr.getName()
-       << formatv("(void *bcUserState, MlirBytecode{0}Handle bc{0}Handle",
-                  capitalize(kind));
-
-    if (members->getNumArgs() > 0)
-      os << ", ";
-    interleaveComma(zip(members->getArgs(), members->getArgNames()), os,
-                    [&](auto it) {
-                      Record *attr = cast<DefInit>(std::get<0>(it))->getDef();
-                      os << attr->getValueAsString("cType") << " "
-                         << std::get<1>(it)->getAsUnquotedString();
-                    });
-  }
+  if (members->getNumArgs() > 0)
+    os << ", ";
+  interleaveComma(zip(members->getArgs(), members->getArgNames()), os,
+                  [&](auto it) {
+                    Record *attr = cast<DefInit>(std::get<0>(it))->getDef();
+                    os << attr->getValueAsString("cType") << " "
+                       << std::get<1>(it)->getAsUnquotedString();
+                  });
   headerOs << ");\n\n";
-
-  if (generateWeak)
-    cppOs << ") {\n . return mlirBytecodeUnhandled();\n}\n\n";
 
   return false;
 }
@@ -366,38 +305,44 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
     }
   }
 
+  if (dialectAttrOrType.size() != 1)
+    return reportError("Only single dialect per invocation allowed");
+
   // Compare two records by enum value.
   auto compEnum = [](Record *lhs, Record *rhs) -> int {
     return lhs->getValueAsInt("enum") < rhs->getValueAsInt("enum");
   };
 
-  auto mainFileRoot =
-      std::filesystem::path(records.getInputFilename()).remove_filename();
-  for (auto it : dialectAttrOrType) {
-    Generator gen(it.first);
-    if (gen.init(mainFileRoot))
-      return true;
+  auto mainFile = std::filesystem::path(records.getInputFilename()).remove_filename();
 
-    {
-      std::vector<Record *> &vec = it.second.attr;
-      std::sort(vec.begin(), vec.end(), compEnum);
-      for (auto kt : vec)
-        if (gen.emitParse("attr", *kt) || gen.emitCreate("attr", *kt))
-          return true;
-      gen.emitDispatch("attr", vec);
-    }
+  auto it = dialectAttrOrType.front();
+  Generator gen(it.first);
+  if (gen.init(mainFile
+  
+  ))
+    return true;
 
-    {
-      std::vector<Record *> &vec = it.second.type;
-      std::sort(vec.begin(), vec.end(), compEnum);
-      for (auto kt : vec)
-        if (gen.emitParse("type", *kt) || gen.emitCreate("type", *kt))
-          return true;
-      gen.emitDispatch("type", vec);
-    }
-
-    gen.fin();
+  {
+    // Handle Attribute emission.
+    std::vector<Record *> &vec = it.second.attr;
+    std::sort(vec.begin(), vec.end(), compEnum);
+    for (auto kt : vec)
+      if (gen.emitParse("attr", *kt) || gen.emitCreate("attr", *kt))
+        return true;
+    gen.emitDispatch("attr", vec);
   }
+
+  {
+    // Handle Type emission.
+    std::vector<Record *> &vec = it.second.type;
+    std::sort(vec.begin(), vec.end(), compEnum);
+    for (auto kt : vec)
+      if (gen.emitParse("type", *kt) || gen.emitCreate("type", *kt))
+        return true;
+    gen.emitDispatch("type", vec);
+  }
+
+  gen.fin(os);
 
   return false;
 }
