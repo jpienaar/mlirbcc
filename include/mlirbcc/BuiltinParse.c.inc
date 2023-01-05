@@ -554,7 +554,7 @@ static MlirBytecodeStatus parseIntegerType(void *bcUserState,
       mlirBytecodeSucceeded(
           ((width = _widthAndSignedness >> 2), mlirBytecodeSuccess()))) {
     return mlirBytecodeCreateBuiltinIntegerType(bcUserState, bcTypeHandle,
-                                                signedness, width);
+                                                (MlirBuiltinSignednessSemantics)signedness, width);
   }
   return mlirBytecodeEmitError("invalid IntegerType");
 }

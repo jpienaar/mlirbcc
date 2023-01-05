@@ -10,12 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 // This file contains the full implementation for an event-based MLIR bytecode
-// parser. It is defined as a pure include-only implementation. To use:
-//
-//   #define MLIRBC_PARSE_IMPLEMENTATION
-//   #include "mlirbcc/Parse.h"
-//   // Include dialect specific parsing extensions with required types.
-//   #include "mlirbcc/BuiltinParse.h"
+// parser. It is defined as a pure include-only implementation.
 //
 // Define types and functions required for parsing (see below) and simplest
 // entry point is `mlirBytecodeParseFile`.
@@ -34,11 +29,17 @@
 #include "mlirbcc/BytecodeTypes.h"
 
 #include <assert.h>
+#include <inttypes.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#if defined(MLIRBC_DEBUG) || defined(MLIRBC_VERBOSE_ERROR)
+#include <stdarg.h>
+#include <stdio.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -642,7 +643,7 @@ mbci_populateParserPosForSection(MlirBytecodeBytesRef ref) {
 }
 
 MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes) {
-  MlirBytecodeStream ret = {0};
+  MlirBytecodeStream ret;
   ret.start = ret.pos = bytes.data;
   ret.end = ret.start + bytes.length;
   return ret;
@@ -667,7 +668,7 @@ mlirBytecodeForEachString(void *callerState,
   // Parse each of the strings. The sizes of the strings are encoded in reverse
   // order, so that's the order we populate the table.
   size_t stringDataEndOffset = stringSection.length;
-  for (int i = numStrings; i > 0; --i) {
+  for (uint64_t i = numStrings; i > 0; --i) {
     uint64_t stringSize;
     if (mlirBytecodeFailed(mlirBytecodeParseVarInt(&stream, &stringSize)))
       return mlirBytecodeEmitError("failed to parse string size of string %d",
@@ -909,7 +910,7 @@ mlirBytecodeForEachResource(void *callerState,
       if (mlirBytecodeFailed(mbci_parseByte(&offsetPP, &kind)))
         return mlirBytecodeEmitError("invalid/missing resource kind");
 
-      MlirBytecodeAsmResourceEntryKind resKind = kind;
+      MlirBytecodeAsmResourceEntryKind resKind = (MlirBytecodeAsmResourceEntryKind)kind;
       switch (resKind) {
       case kMlirBytecodeResourceEntryBool: {
         uint8_t value;
