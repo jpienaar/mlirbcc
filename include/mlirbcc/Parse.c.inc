@@ -128,9 +128,6 @@ mlirBytecodeProcessAttribute(void *callerState, MlirBytecodeAttrHandle handle);
 MLIRBC_DEF MlirBytecodeStatus
 mlirBytecodeProcessType(void *callerState, MlirBytecodeTypeHandle handle);
 
-//===----------------------------------------------------------------------===//
-// Section parsing entry points.
-
 /// Invoked with dialect and attribute with the attribute's range in memory.
 // TODO: This and others currently pass in total number of attributes per
 // invocation, consider factoring out to an initialize that sets total size.
@@ -138,24 +135,10 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeAttrCallBack(
     void *, MlirBytecodeAttrHandle, size_t total, MlirBytecodeDialectHandle,
     MlirBytecodeBytesRef, bool hasCustom);
 
-// Parse and associate attr handle with parsed attribute.
-typedef MlirBytecodeStatus (*MlirBytecodeAttrParseCallBack)(
-    void *, MlirBytecodeAttrHandle, MlirBytecodeBytesRef, bool hasCustom);
-
 /// Invoked with dialect and type with the type's range in memory.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeTypeCallBack(
     void *, MlirBytecodeTypeHandle, size_t total, MlirBytecodeDialectHandle,
     MlirBytecodeBytesRef, bool hasCustom);
-
-// Parse and associate type handle with parsed type.
-typedef MlirBytecodeStatus (*MlirBytecodeTypeParseCallBack)(
-    void *, MlirBytecodeTypeHandle, MlirBytecodeBytesRef, bool hasCustom);
-
-/// Iterators over attributes and types, calling MlirBytecodeAttrCallBack and
-/// MlirBytecodeTypeCallBack upon encountering Attribute or Type respectively.
-/// Returns whether failed.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeForEachAttributeAndType(
-    void *callerState, MlirBytecodeFile *mlirFile);
 
 /// Invoked with dialect handle and its corresponding string handle.
 MLIRBC_DEF MlirBytecodeStatus
@@ -164,15 +147,58 @@ mlirBytecodeDialectCallBack(void *, MlirBytecodeDialectHandle, size_t /*total*/,
 
 /// Invoked with opname with its dialect and string handle corresponding to its
 /// name.
-MLIRBC_DEF MlirBytecodeStatus
+static MlirBytecodeStatus
 mlirBytecodeDialectOpCallBack(void *, MlirBytecodeDialectHandle,
                               MlirBytecodeOpHandle, MlirBytecodeStringHandle);
+
+/// Invoked with groupKey[resourceKey] and either MlirBytecodeStatus, string or
+/// blob.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceCallBack(
+    void *, MlirBytecodeStringHandle groupKey, MlirBytecodeSize totalGroups,
+    MlirBytecodeStringHandle resourceKey, MlirBytecodeAsmResourceEntryKind,
+    const MlirBytecodeBytesRef *blob, const uint8_t *MlirBytecodeStatusResource,
+    const MlirBytecodeStringHandle *);
+
+/// Invoked with string handle, total number of strings in string section and
+/// bytes corresponding to the string per entry in string section.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeStringCallBack(
+    void *, MlirBytecodeStringHandle, size_t total, MlirBytecodeBytesRef);
+
+// Returns the requested string from the string section.
+// It is only used for debugging messages in Parse.h.
+MLIRBC_DEF MlirBytecodeBytesRef mlirBytecodeGetStringSectionValue(
+    void *callerState, const MlirBytecodeFile *mlirFile,
+    MlirBytecodeStringHandle idx);
+
+//===----------------------------------------------------------------------===//
+// Section parsing entry points.
+
+// Parse and associate attr handle with parsed attribute.
+typedef MlirBytecodeStatus (*MlirBytecodeAttrParseCallBack)(
+    void *, MlirBytecodeAttrHandle, MlirBytecodeBytesRef, bool hasCustom);
+
+// Parse and associate type handle with parsed type.
+typedef MlirBytecodeStatus (*MlirBytecodeTypeParseCallBack)(
+    void *, MlirBytecodeTypeHandle, MlirBytecodeBytesRef, bool hasCustom);
+
+/// Iterators over attributes and types, calling MlirBytecodeAttrCallBack and
+/// MlirBytecodeTypeCallBack upon encountering Attribute or Type respectively.
+/// Returns whether failed.
+static MlirBytecodeStatus
+mlirBytecodeForEachAttributeAndType(void *callerState,
+                                    MlirBytecodeFile *mlirFile);
 
 /// Parses the dialect section, invoking MlirBytecodeDialectCallBack upon
 /// dialect encountered and MlirBytecodeDialectOpCallBack per operation type in
 /// dialect. Returns whether failed.
-MLIRBC_DEF MlirBytecodeStatus
+static MlirBytecodeStatus
 mlirBytecodeParseDialectSection(void *callerState, MlirBytecodeFile *mlirFile);
+
+/// Invoked with opname with its dialect and string handle corresponding to its
+/// name.
+static MlirBytecodeStatus
+mlirBytecodeDialectOpCallBack(void *, MlirBytecodeDialectHandle,
+                              MlirBytecodeOpHandle, MlirBytecodeStringHandle);
 
 /// Parse IR section in mlirFile. The block args, operation and region callback
 /// are invoked during bytecode in-order walk. Additionally allows for passing
@@ -183,43 +209,29 @@ mlirBytecodeParseDialectSection(void *callerState, MlirBytecodeFile *mlirFile);
 /// The caller is required to keep track of when all operations/blocks in
 /// block/region have been processed and so parsing resumes at parent level.
 /// Returns whether failed.
-MLIRBC_DEF MlirBytecodeStatus
+static MlirBytecodeStatus
 mlirBytecodeParseIRSection(void *callerState, MlirBytecodeFile *mlirFile);
-
-/// Invoked with groupKey[resourceKey] and either MlirBytecodeStatus, string or
-/// blob.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceCallBack(
-    void *, MlirBytecodeStringHandle groupKey, MlirBytecodeSize totalGroups,
-    MlirBytecodeStringHandle resourceKey, MlirBytecodeAsmResourceEntryKind,
-    const MlirBytecodeBytesRef *blob, const uint8_t *MlirBytecodeStatusResource,
-    const MlirBytecodeStringHandle *);
 
 /// Parse the resource section, calling MlirBytecodeResourceCallBack upon
 /// resources encountered. Returns whether failed.
-MLIRBC_DEF MlirBytecodeStatus
+static MlirBytecodeStatus
 mlirBytecodeForEachResource(void *callerState, MlirBytecodeFile *mlirFile);
-
-/// Invoked with string handle, total number of strings in string section and
-/// bytes corresponding to the string per entry in string section.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeStringCallBack(
-    void *, MlirBytecodeStringHandle, size_t total, MlirBytecodeBytesRef);
 
 //===----------------------------------------------------------------------===//
 // MLIR file parsing methods.
 
 /// Populates the MlirBytecodeFile contents for given in memory bytes.
 /// Returns an empty file if population failed.
-MLIRBC_DEF MlirBytecodeFile
-mlirBytecodePopulateFile(MlirBytecodeBytesRef bytes);
+static MlirBytecodeFile mlirBytecodePopulateFile(MlirBytecodeBytesRef bytes);
 
 /// Parses the given MLIR file represented in memory `bytes`, calls the
 /// appropriate callbacks during parsing. This combines the parsing methods
 /// below.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeParseFile(void *callerState,
-                                                    MlirBytecodeBytesRef bytes);
+static MlirBytecodeStatus mlirBytecodeParseFile(void *callerState,
+                                                MlirBytecodeBytesRef bytes);
 
 /// Returns whether the given MlirBytecodeFile structure is empty.
-MLIRBC_DEF bool mlirBytecodeFileEmpty(MlirBytecodeFile *file);
+static bool mlirBytecodeFileEmpty(MlirBytecodeFile *file);
 
 //===----------------------------------------------------------------------===//
 // Dialect parsing utility methods.
@@ -257,14 +269,6 @@ mlirBytecodeParseVarIntWithFlag(MlirBytecodeStream *stream, uint64_t *result,
 static MlirBytecodeStatus
 mlirBytecodeParseNullTerminatedString(MlirBytecodeStream *stream,
                                       MlirBytecodeBytesRef *str);
-
-//===----------------------------------------------------------------------===//
-// They are only used for debugging messages in Parse.h.
-
-// Returns the requested string from the string section.
-MLIRBC_DEF MlirBytecodeBytesRef mlirBytecodeGetStringSectionValue(
-    void *callerState, const MlirBytecodeFile *mlirFile,
-    MlirBytecodeStringHandle idx);
 
 #ifdef __cplusplus
 }
