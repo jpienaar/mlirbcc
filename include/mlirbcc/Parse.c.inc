@@ -109,12 +109,12 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
     uint64_t numArgs);
 
 /// Called when exiting the block.
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeBlockPop(void *callerState, MlirBytecodeOperationStateHandle);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateBlockPop(
+    void *callerState, MlirBytecodeOperationStateHandle);
 
 /// Called when exiting a region.
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeRegionPop(void *callerState, MlirBytecodeOperationStateHandle);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateRegionPop(
+    void *callerState, MlirBytecodeOperationStateHandle);
 
 /// Called to process an attribute handle and convert it into an attribute.
 /// This may result in triggering additional parsing and processing of
@@ -1240,7 +1240,7 @@ MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
     bool next = false;
     if (top->numOpsRemaining == 0) {
       mlirBytecodeEmitDebug("no ops remaining in block");
-      ret = mlirBytecodeBlockPop(callerState, top->op);
+      ret = mlirBytecodeOperationStateBlockPop(callerState, top->op);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
 
@@ -1250,7 +1250,7 @@ MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
     }
     if (top->numBlocksRemaining == 0) {
       mlirBytecodeEmitDebug("no blocks remaining in region");
-      ret = mlirBytecodeRegionPop(callerState, top->op);
+      ret = mlirBytecodeOperationStateRegionPop(callerState, top->op);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
 

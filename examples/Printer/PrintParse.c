@@ -626,9 +626,8 @@ MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus
-mlirBytecodeBlockPop(void *callerState,
-                     MlirBytecodeOperationStateHandle opStateHandle) {
+MlirBytecodeStatus mlirBytecodeOperationStateBlockPop(
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle) {
   ParsingState *state = callerState;
   state->indentSize -= 2;
   return mlirBytecodeSuccess();
@@ -655,9 +654,8 @@ mlirBytecodeRegionPush(void *callerState,
   state->indentSize += 2;
   return mlirBytecodeSuccess();
 }
-MlirBytecodeStatus
-mlirBytecodeRegionPop(void *callerState,
-                      MlirBytecodeOperationStateHandle opStateHandle) {
+MlirBytecodeStatus mlirBytecodeOperationStateRegionPop(
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle) {
   ParsingState *state = callerState;
   --state->depth;
   state->indentSize -= 2;
