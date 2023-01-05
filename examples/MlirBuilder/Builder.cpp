@@ -11,8 +11,6 @@
 
 // Include bytecode parsing implementation.
 #include "mlirbcc/Parse.c.inc"
-// Dialects.
-#include "mlirbcc/BuiltinParse.c.inc"
 
 int main() {
   return 0;
