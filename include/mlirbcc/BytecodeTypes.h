@@ -56,7 +56,7 @@ struct MlirBytecodeOpRef {
   // Handle to op dialect.
   MlirBytecodeDialectHandle dialect;
   // Handle to op.
-  MlirBytecodeOpHandle op;
+  MlirBytecodeStringHandle op;
 };
 typedef struct MlirBytecodeOpRef MlirBytecodeOpRef;
 
