@@ -75,13 +75,15 @@ mlirBytecodeOperationStateBlockPush(void *callerState,
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeBlockPop(void *callerState,
-                                        MlirBytecodeOperationStateHandle) {
+MlirBytecodeStatus
+mlirBytecodeOperationStateBlockPop(void *callerState,
+                                   MlirBytecodeOperationStateHandle) {
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeRegionPop(void *callerState,
-                                         MlirBytecodeOperationStateHandle) {
+MlirBytecodeStatus
+mlirBytecodeOperationStateRegionPop(void *callerState,
+                                    MlirBytecodeOperationStateHandle) {
   return mlirBytecodeUnhandled();
 }
 
