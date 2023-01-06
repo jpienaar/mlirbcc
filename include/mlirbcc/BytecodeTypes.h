@@ -30,10 +30,11 @@ struct MlirBytecodeHandle {
 typedef struct MlirBytecodeHandle MlirBytecodeHandle;
 typedef MlirBytecodeHandle MlirBytecodeAttrHandle;
 typedef MlirBytecodeHandle MlirBytecodeDialectHandle;
+typedef MlirBytecodeHandle MlirBytecodeLocHandle;
 typedef MlirBytecodeHandle MlirBytecodeOpHandle;
+typedef MlirBytecodeHandle MlirBytecodeResourceHandle;
 typedef MlirBytecodeHandle MlirBytecodeStringHandle;
 typedef MlirBytecodeHandle MlirBytecodeTypeHandle;
-typedef MlirBytecodeHandle MlirBytecodeLocHandle;
 
 // Handle to operation state.
 struct MlirBytecodeOperationStateHandle {
@@ -90,6 +91,17 @@ enum MlirBytecodeAsmResourceEntryKind {
   kMlirBytecodeResourceEntryString,
 };
 typedef enum MlirBytecodeAsmResourceEntryKind MlirBytecodeAsmResourceEntryKind;
+
+struct MlirBytecodeAPInt {
+  // If bitWidth <= 64 then value is populated, else
+  union {
+    int64_t value;
+    uint64_t *data;
+  } U;
+
+  unsigned bitWidth;
+};
+typedef struct MlirBytecodeAPInt MlirBytecodeAPInt;
 
 #ifdef __cplusplus
 }
