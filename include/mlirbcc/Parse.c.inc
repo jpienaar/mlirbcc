@@ -242,7 +242,7 @@ static MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef ref);
 /// Reset the stream to its head.
 static void mlirBytecodeStreamReset(MlirBytecodeStream *stream);
 
-/// Decode the next handle on the stream and increment stream.
+/// Parse the next handle on the stream and increment stream.
 static MlirBytecodeStatus mlirBytecodeParseHandle(MlirBytecodeStream *stream,
                                                   MlirBytecodeHandle *result);
 
@@ -250,13 +250,25 @@ static MlirBytecodeStatus mlirBytecodeParseHandle(MlirBytecodeStream *stream,
 static MlirBytecodeStatus mlirBytecodeSkipHandles(MlirBytecodeStream *stream,
                                                   uint64_t n);
 
-/// Decode uint64 on the stream and increment stream.
+/// Parse byte from stream.
+static MlirBytecodeStatus mlirBytecodeParseByte(MlirBytecodeStream *stream,
+                                                uint8_t *val);
+
+/// Parse n bytes from stream.
+static MlirBytecodeStatus mlirBytecodeParseBytes(MlirBytecodeStream *stream,
+                                                 size_t n, const uint8_t **val);
+
+/// Parse uint64 on the stream and increment stream.
 static MlirBytecodeStatus mlirBytecodeParseVarInt(MlirBytecodeStream *stream,
                                                   uint64_t *result);
 
-/// Decode int64 on the stream and increment stream.
+/// Parse int64 on the stream and increment stream.
 static MlirBytecodeStatus
 mlirBytecodeParseSignedVarInt(MlirBytecodeStream *stream, int64_t *result);
+
+/// Parse APInt of known width.
+static MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
+    MlirBytecodeStream *stream, unsigned bitWidth, MlirBytecodeAPInt *result);
 
 /// Parse a variable length encoded integer whose low bit is used to encode a
 /// flag, i.e: `(integerValue << 1) | (flag ? 1 : 0)`.
@@ -462,19 +474,21 @@ static bool mbci_streamEmpty(MlirBytecodeStream *stream) {
   return stream->pos >= stream->end;
 }
 
-static MlirBytecodeStatus mbci_parseByte(MlirBytecodeStream *stream,
-                                         uint8_t *val) {
+static MlirBytecodeStatus mlirBytecodeParseByte(MlirBytecodeStream *stream,
+                                                uint8_t *val) {
   if (mbci_streamEmpty(stream))
     return mlirBytecodeFailure();
   *val = *stream->pos++;
   return mlirBytecodeSuccess();
 }
 
-static MlirBytecodeStatus mbci_parseBytes(MlirBytecodeStream *stream,
-                                          uint8_t *val, size_t n) {
-  for (uint64_t i = 0; i < n; ++i)
-    if (mlirBytecodeFailed(mbci_parseByte(stream, val++)))
-      return mlirBytecodeFailure();
+static MlirBytecodeStatus mlirBytecodeParseBytes(MlirBytecodeStream *stream,
+                                                 size_t n,
+                                                 const uint8_t **result) {
+  *result = stream->pos;
+  stream->pos += n;
+  if (stream->pos > stream->end)
+    return mlirBytecodeFailure();
   return mlirBytecodeSuccess();
 }
 
@@ -489,7 +503,7 @@ static MlirBytecodeStatus mbci_skipVarInts(MlirBytecodeStream *stream,
                                            size_t n) {
   for (size_t i = 0; i < n; ++i) {
     uint8_t head;
-    if (mlirBytecodeFailed(mbci_parseByte(stream, &head)))
+    if (mlirBytecodeFailed(mlirBytecodeParseByte(stream, &head)))
       return mlirBytecodeFailure();
     int numBytes = (head == 0) ? 8 : __builtin_ctz(head);
     if (mlirBytecodeFailed(mbci_skipBytes(stream, numBytes)))
@@ -518,7 +532,7 @@ MlirBytecodeStatus mlirBytecodeParseVarInt(MlirBytecodeStream *stream,
   // up to 7-bits of data. We only check up to the number of bits we can encode
   // in the first byte (8).
   uint8_t head;
-  if (mlirBytecodeFailed(mbci_parseByte(stream, &head)))
+  if (mlirBytecodeFailed(mlirBytecodeParseByte(stream, &head)))
     return mlirBytecodeFailure();
   *result = head;
   if ((*result & 1)) {
@@ -527,17 +541,24 @@ MlirBytecodeStatus mlirBytecodeParseVarInt(MlirBytecodeStream *stream,
   }
 
   if (*result == 0) {
-    uint8_t *ptr = (uint8_t *)(result);
-    if (mlirBytecodeFailed(mbci_parseBytes(stream, ptr, sizeof(*result))))
+    const uint8_t *res;
+    if (mlirBytecodeFailed(
+            mlirBytecodeParseBytes(stream, sizeof(*result), &res)))
       return mlirBytecodeFailure();
+    uint8_t *ptr = (uint8_t *)(result);
+    for (int i = 0, e = sizeof(*result); i < e; ++i)
+      ptr[i] = res[i];
     return mlirBytecodeSuccess();
   }
 
   // Parse in the remaining bytes of the value.
   uint32_t numBytes = __builtin_ctz(*result);
-  uint8_t *ptr = (uint8_t *)(result) + 1;
-  if (mlirBytecodeFailed(mbci_parseBytes(stream, ptr, numBytes)))
+  const uint8_t *res;
+  if (mlirBytecodeFailed(mlirBytecodeParseBytes(stream, numBytes, &res)))
     return mlirBytecodeFailure();
+  uint8_t *ptr = (uint8_t *)(result) + 1;
+  for (uint32_t i = 0; i < numBytes; ++i)
+    ptr[i] = res[i];
 
   // Shift out the low-order bits that were used to mark how the value was
   // encoded.
@@ -563,6 +584,47 @@ MlirBytecodeStatus mlirBytecodeParseSignedVarInt(MlirBytecodeStream *stream,
   return mlirBytecodeSuccess();
 }
 
+MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
+    MlirBytecodeStream *stream, unsigned bitWidth, MlirBytecodeAPInt *result) {
+  result->bitWidth = bitWidth;
+  MlirBytecodeStatus ret;
+  // Small values are encoded using a single byte.
+  if (bitWidth <= 8) {
+    uint8_t value;
+    ret = mlirBytecodeParseByte(stream, &value);
+    if (!mlirBytecodeSucceeded(ret))
+      return ret;
+    return ret;
+
+    result->U.value = value;
+    return mlirBytecodeSuccess();
+  }
+
+  // Large values up to 64 bits are encoded using a single varint.
+  if (bitWidth <= 64) {
+    ret = mlirBytecodeParseSignedVarInt(stream, &result->U.value);
+    if (!mlirBytecodeSucceeded(ret))
+      return ret;
+    return mlirBytecodeSuccess();
+  }
+
+  // Otherwise, for really big values we encode the array of active words in
+  // the value.
+  uint64_t numActiveWords;
+  ret = mlirBytecodeParseVarInt(stream, &numActiveWords);
+  if (!mlirBytecodeSucceeded(ret))
+    return ret;
+
+  // FIXME: This is 
+  result->U.data = (uint64_t *)malloc(numActiveWords * sizeof(uint64_t));
+  for (uint64_t i = 0; i < numActiveWords; ++i) {
+    ret = mlirBytecodeParseSignedVarInt(stream, (int64_t*)&result->U.data[i]);
+    if (!mlirBytecodeSucceeded(ret))
+      return ret;
+  }
+  return mlirBytecodeSuccess();
+}
+
 // Align the current reader position to the specified alignment.
 static MlirBytecodeStatus mbci_alignTo(MlirBytecodeStream *stream,
                                        uint32_t alignment) {
@@ -576,7 +638,7 @@ static MlirBytecodeStatus mbci_alignTo(MlirBytecodeStream *stream,
   // Shift the reader position to the next alignment boundary.
   while ((uintptr_t)stream->pos & ((uintptr_t)alignment - 1)) {
     uint8_t padding;
-    if (mlirBytecodeFailed(mbci_parseByte(stream, &padding)))
+    if (mlirBytecodeFailed(mlirBytecodeParseByte(stream, &padding)))
       return mlirBytecodeFailure();
     if (padding != kAlignmentByte) {
       return mlirBytecodeEmitError(
@@ -595,7 +657,7 @@ mbci_parseSections(MlirBytecodeStream *stream,
                    MlirBytecodeBytesRef sectionData[mbci_kNumSections]) {
   uint8_t byte;
   uint64_t length;
-  if (mlirBytecodeFailed(mbci_parseByte(stream, &byte)) ||
+  if (mlirBytecodeFailed(mlirBytecodeParseByte(stream, &byte)) ||
       mlirBytecodeFailed(mlirBytecodeParseVarInt(stream, &length)))
     return mlirBytecodeFailure();
   uint8_t sectionID = byte & 0x7f;
@@ -911,14 +973,15 @@ mlirBytecodeForEachResource(void *callerState,
       if (mlirBytecodeFailed(mlirBytecodeParseVarInt(&offsetPP, &size)))
         return mlirBytecodeEmitError("invalid/missing resource size");
       uint8_t kind;
-      if (mlirBytecodeFailed(mbci_parseByte(&offsetPP, &kind)))
+      if (mlirBytecodeFailed(mlirBytecodeParseByte(&offsetPP, &kind)))
         return mlirBytecodeEmitError("invalid/missing resource kind");
 
-      MlirBytecodeAsmResourceEntryKind resKind = (MlirBytecodeAsmResourceEntryKind)kind;
+      MlirBytecodeAsmResourceEntryKind resKind =
+          (MlirBytecodeAsmResourceEntryKind)kind;
       switch (resKind) {
       case kMlirBytecodeResourceEntryBool: {
         uint8_t value;
-        if (mlirBytecodeFailed(mbci_parseByte(&resPP, &value)))
+        if (mlirBytecodeFailed(mlirBytecodeParseByte(&resPP, &value)))
           return mlirBytecodeEmitError("invalid/missing resource entry");
         if (mlirBytecodeFailed(mlirBytecodeResourceCallBack(
                 callerState, (MlirBytecodeStringHandle){.id = groupKey},
@@ -1111,7 +1174,7 @@ static MlirBytecodeStatus mbci_parseOperation(MlirBytecodeStream *stream,
     return mlirBytecodeEmitError("invalid operation");
 
   uint8_t encodingMask;
-  if (mlirBytecodeFailed(mbci_parseByte(stream, &encodingMask)))
+  if (mlirBytecodeFailed(mlirBytecodeParseByte(stream, &encodingMask)))
     return mlirBytecodeEmitError("invalid encoding mask");
 
   MlirBytecodeLocHandle loc;
@@ -1306,8 +1369,8 @@ MlirBytecodeFile mlirBytecodePopulateFile(const MlirBytecodeBytesRef bytes) {
   memset(&ret, 0, sizeof(MlirBytecodeFile));
   MlirBytecodeStream stream = mbci_populateParserPosForSection(bytes);
 
-  uint8_t magic[4];
-  if (mlirBytecodeFailed(mbci_parseBytes(&stream, magic, 4)))
+  const uint8_t *magic;
+  if (mlirBytecodeFailed(mlirBytecodeParseBytes(&stream, 4, &magic)))
     return mlirBytecodeEmitError("unable to read 4 byte magic code"), ret;
   if (magic[0] != 'M' || magic[1] != 'L' || magic[2] != 0xef || magic[3] != 'R')
     return mlirBytecodeEmitError("invalid file magic code"), ret;
