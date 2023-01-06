@@ -26,7 +26,7 @@ mlirBytecodeParseBuiltinType(void *state, MlirBytecodeTypeHandle typeHandle,
                              MlirBytecodeBytesRef str, bool hasCustom);
 
 // NOTE: this is proof-of-concept and just enough working to show end-to-end.
-// The parsing of attributes/types (especially those with arrays).
+// The parsing of attributes/types (especially those with arrays) will change.
 
 //===----------------------------------------------------------------------===//
 // Create attributes.
