@@ -900,10 +900,11 @@ int main(int argc, char **argv) {
   state.types = 0;
 
   MlirBytecodeBytesRef ref = {.data = stream, .length = fileInfo.st_size};
-  MlirBytecodeFile mlirFile = mlirBytecodePopulateFile(&state, ref);
+  MlirBytecodeParserState mlirFile =
+      mlirBytecodePopulateParserState(&state, ref);
 
-  if (!mlirBytecodeFileEmpty(&mlirFile) &&
-      mlirBytecodeFailed(mlirBytecodeParseFile(&state, ref)))
+  if (!mlirBytecodeParserStateEmpty(&mlirFile) &&
+      mlirBytecodeFailed(mlirBytecodeParse(&state, ref)))
     return mlirBytecodeEmitError(NULL, "MlirBytecodeFailed to parse file"), 1;
 
   if (munmap(stream, fileInfo.st_size) == -1) {
