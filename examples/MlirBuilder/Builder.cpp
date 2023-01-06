@@ -8,10 +8,91 @@
 
 #include "mlir-c/IR.h"
 #include "mlir-c/Support.h"
+#include "mlir/Bytecode/BytecodeImplementation.h"
 #include "llvm/Support/SourceMgr.h"
 
 // Include bytecode parsing implementation.
+#include "mlir/IR/Diagnostics.h"
 #include "mlirbcc/Parse.c.inc"
+
+using namespace mlir;
+
+class Reader : public mlir::DialectBytecodeReader {
+public:
+  InFlightDiagnostic emitError(const Twine &msg = {}) override;
+  LogicalResult readAttribute(Attribute &result) override;
+  LogicalResult readType(Type &result) override;
+  LogicalResult readVarInt(uint64_t &result) override;
+  LogicalResult readSignedVarInt(int64_t &result) override;
+  FailureOr<APInt> readAPIntWithKnownWidth(unsigned bitWidth) override;
+  FailureOr<APFloat>
+  readAPFloatWithKnownSemantics(const llvm::fltSemantics &semantics) override;
+  LogicalResult readString(StringRef &result) override;
+  LogicalResult readBlob(ArrayRef<char> &result) override;
+
+  Attribute attribute(int i) const;
+  Type type(int i) const;
+
+private:
+  FailureOr<AsmDialectResourceHandle> readResourceHandle() override;
+
+  MlirBytecodeStream stream;
+
+  std::vector<Attribute> attributes;
+
+  Location *loc;
+};
+
+InFlightDiagnostic Reader::emitError(const Twine &msg) {
+  return mlir::emitError(*loc, msg);
+}
+
+LogicalResult Reader::readAttribute(Attribute &result) {
+  MlirBytecodeAttrHandle handle;
+  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(&stream, &handle)))
+    return failure();
+  if (!mlirBytecodeSucceeded(mlirBytecodeProcessAttribute(this, handle)))
+    return failure();
+  result = attribute(handle.id);
+  return success();
+}
+
+LogicalResult Reader::readType(Type &result) {
+  MlirBytecodeAttrHandle handle;
+  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(&stream, &handle)))
+    return failure();
+  if (!mlirBytecodeSucceeded(mlirBytecodeProcessType(this, handle)))
+    return failure();
+  result = type(handle.id);
+  return success();
+}
+
+LogicalResult Reader::readVarInt(uint64_t &result) {
+  return failure(
+      !mlirBytecodeSucceeded(mlirBytecodeParseVarInt(&stream, &result)));
+}
+
+LogicalResult Reader::readSignedVarInt(int64_t &result) {
+  return failure(
+      !mlirBytecodeSucceeded(mlirBytecodeParseSignedVarInt(&stream, &result)));
+}
+
+FailureOr<APInt> Reader::readAPIntWithKnownWidth(unsigned bitWidth) {
+  return failure();
+}
+
+FailureOr<APFloat>
+Reader::readAPFloatWithKnownSemantics(const llvm::fltSemantics &semantics) {
+  return failure();
+}
+
+LogicalResult Reader::readString(StringRef &result) { return failure(); }
+
+LogicalResult Reader::readBlob(ArrayRef<char> &result) { return failure(); }
+
+FailureOr<AsmDialectResourceHandle> Reader::readResourceHandle() {
+  return failure();
+}
 
 MlirBytecodeStatus
 mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOpHandle name,
@@ -168,8 +249,9 @@ int main(int argc, char **argv) {
                               .length = buffer->getBufferSize()};
   MlirBytecodeFile mlirFile = mlirBytecodePopulateFile(ref);
 
+  Reader reader;
   if (!mlirBytecodeFileEmpty(&mlirFile) &&
-      mlirBytecodeFailed(mlirBytecodeParseFile(nullptr, ref)))
+      mlirBytecodeFailed(mlirBytecodeParseFile(&reader, ref)))
     return mlirBytecodeEmitError("MlirBytecodeFailed to parse file"), 1;
 
   return 0;
