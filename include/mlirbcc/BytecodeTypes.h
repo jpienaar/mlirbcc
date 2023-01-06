@@ -82,16 +82,6 @@ struct MlirBytecodeHandleIterator {
 };
 typedef struct MlirBytecodeHandleIterator MlirBytecodeHandleIterator;
 
-enum MlirBytecodeAsmResourceEntryKind {
-  /// A blob of data with an accompanying alignment.
-  kMlirBytecodeResourceEntryBlob,
-  /// A boolean value.
-  kMlirBytecodeResourceEntryBool,
-  /// A string value.
-  kMlirBytecodeResourceEntryString,
-};
-typedef enum MlirBytecodeAsmResourceEntryKind MlirBytecodeAsmResourceEntryKind;
-
 struct MlirBytecodeAPInt {
   // If bitWidth <= 64 then value is populated, else
   union {

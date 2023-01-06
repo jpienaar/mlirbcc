@@ -17,9 +17,8 @@
 
 using namespace mlir;
 
-class MlirbcDialectBytecodeReader : public mlir::DialectBytecodeReader {
-public:
-  MlirbcDialectBytecodeReader(Location loc) : loc(loc) {};
+struct MlirbcDialectBytecodeReader : public mlir::DialectBytecodeReader {
+  MlirbcDialectBytecodeReader(Location loc) : loc(loc){};
 
   InFlightDiagnostic emitError(const Twine &msg = {}) override;
   LogicalResult readAttribute(Attribute &result) override;
@@ -35,14 +34,15 @@ public:
   Attribute attribute(int i) const { return attributes[i]; }
   Type type(int i) const { return types[i]; }
 
-private:
   FailureOr<AsmDialectResourceHandle> readResourceHandle() override;
 
   MlirBytecodeStream stream;
 
+  // These are all public to enable access via plain C functions.
   std::vector<Attribute> attributes;
   std::vector<Type> types;
   std::vector<AsmDialectResourceHandle> resources;
+  std::vector<StringRef> strings;
 
   Location loc;
 };
@@ -112,11 +112,10 @@ LogicalResult MlirbcDialectBytecodeReader::readString(StringRef &result) {
   MlirBytecodeStringHandle handle;
   if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(&stream, &handle)))
     return failure();
-  MlirBytecodeBytesRef val =
-      mlirBytecodeGetStringSectionValue(this, nullptr, handle);
-  result = StringRef((const char *)val.data, val.length);
-
-  return failure();
+  if (handle.id >= strings.size())
+    return failure();
+  result = strings[handle.id];
+  return success();
 }
 
 LogicalResult MlirbcDialectBytecodeReader::readBlob(ArrayRef<char> &result) {
@@ -257,19 +256,46 @@ MlirBytecodeStatus mlirBytecodeDialectOpCallBack(void *,
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeResourceCallBack(
-    void *, MlirBytecodeStringHandle groupKey, MlirBytecodeSize totalGroups,
-    MlirBytecodeStringHandle resourceKey, MlirBytecodeAsmResourceEntryKind,
-    const MlirBytecodeBytesRef *blob, const uint8_t *MlirBytecodeStatusResource,
-    const MlirBytecodeStringHandle *) {
+MlirBytecodeStatus
+mlirBytecodeResourceSectionEnter(void *,
+                                 MlirBytecodeSize numExternalResourceGroups) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeResourceGroupEnter(void *, MlirBytecodeStringHandle groupKey,
+                               MlirBytecodeSize numResources) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeResourceBlobCallBack(void *, MlirBytecodeStringHandle resourceKey,
+                                 MlirBytecodeStringHandle groupKey,
+                                 MlirBytecodeBytesRef blob) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeResourceBoolCallBack(void *, MlirBytecodeStringHandle resourceKey,
+                                 MlirBytecodeStringHandle groupKey,
+                                 const uint8_t) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus
+mlirBytecodeResourceStringCallBack(void *, MlirBytecodeStringHandle resourceKey,
+                                   MlirBytecodeStringHandle groupKey,
+                                   MlirBytecodeStringHandle) {
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeBytesRef
 mlirBytecodeGetStringSectionValue(void *callerState,
-                                  const MlirBytecodeFile *mlirFile,
                                   MlirBytecodeStringHandle idx) {
-  return MlirBytecodeBytesRef{.data = 0, .length = 0};
+  auto *state = (MlirbcDialectBytecodeReader *)callerState;
+  auto str = state->strings[idx.id];
+  return MlirBytecodeBytesRef{.data = (const uint8_t *)str.data(),
+                              .length = str.size()};
 }
 
 MlirBytecodeStatus mlirBytecodeStringCallBack(void *, MlirBytecodeStringHandle,

@@ -151,13 +151,22 @@ static MlirBytecodeStatus
 mlirBytecodeDialectOpCallBack(void *, MlirBytecodeDialectHandle,
                               MlirBytecodeOpHandle, MlirBytecodeStringHandle);
 
-/// Invoked with groupKey[resourceKey] and either MlirBytecodeStatus, string or
-/// blob.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceCallBack(
-    void *, MlirBytecodeStringHandle groupKey, MlirBytecodeSize totalGroups,
-    MlirBytecodeStringHandle resourceKey, MlirBytecodeAsmResourceEntryKind,
-    const MlirBytecodeBytesRef *blob, const uint8_t *MlirBytecodeStatusResource,
-    const MlirBytecodeStringHandle *);
+/// Invoked when starting parsing of resources.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceSectionEnter(
+    void *, MlirBytecodeSize numExternalResourceGroups);
+
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceGroupEnter(
+    void *, MlirBytecodeStringHandle groupKey, MlirBytecodeSize numResources);
+
+/// Invoked per blob resource in group.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
+    void *, MlirBytecodeStringHandle groupKey,MlirBytecodeStringHandle resourceKey, MlirBytecodeBytesRef blob);
+/// Invoked per bool resource in group.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
+    void *, MlirBytecodeStringHandle groupKey,MlirBytecodeStringHandle resourceKey, const uint8_t);
+/// Invoked per string resource in group.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceStringCallBack(
+    void *, MlirBytecodeStringHandle groupKey,MlirBytecodeStringHandle resourceKey, MlirBytecodeStringHandle);
 
 /// Invoked with string handle, total number of strings in string section and
 /// bytes corresponding to the string per entry in string section.
@@ -167,8 +176,7 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeStringCallBack(
 // Returns the requested string from the string section.
 // It is only used for debugging messages in Parse.h.
 MLIRBC_DEF MlirBytecodeBytesRef mlirBytecodeGetStringSectionValue(
-    void *callerState, const MlirBytecodeFile *mlirFile,
-    MlirBytecodeStringHandle idx);
+    void *callerState, MlirBytecodeStringHandle idx);
 
 //===----------------------------------------------------------------------===//
 // Section parsing entry points.
@@ -615,10 +623,10 @@ MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
   if (!mlirBytecodeSucceeded(ret))
     return ret;
 
-  // FIXME: This is 
+  // FIXME: This is
   result->U.data = (uint64_t *)malloc(numActiveWords * sizeof(uint64_t));
   for (uint64_t i = 0; i < numActiveWords; ++i) {
-    ret = mlirBytecodeParseSignedVarInt(stream, (int64_t*)&result->U.data[i]);
+    ret = mlirBytecodeParseSignedVarInt(stream, (int64_t *)&result->U.data[i]);
     if (!mlirBytecodeSucceeded(ret))
       return ret;
   }
@@ -783,11 +791,11 @@ MlirBytecodeStatus mlirBytecodeParseDialectSection(void *callerState,
   for (uint64_t i = 0; i < numDialects; ++i) {
     if (mlirBytecodeFailed(mlirBytecodeParseVarInt(&stream, &dialectName)))
       return mlirBytecodeEmitError("unable to parse dialect %d", i);
-    mlirBytecodeEmitDebug("dialect[%d] = %s", i,
-                          mlirBytecodeGetStringSectionValue(
-                              callerState, mlirFile,
-                              (MlirBytecodeDialectHandle){.id = dialectName})
-                              .data);
+    mlirBytecodeEmitDebug(
+        "dialect[%d] = %s", i,
+        mlirBytecodeGetStringSectionValue(
+            callerState, (MlirBytecodeDialectHandle){.id = dialectName})
+            .data);
     if (mlirBytecodeFailed(mlirBytecodeDialectCallBack(
             callerState, (MlirBytecodeDialectHandle){.id = i}, numDialects,
             (MlirBytecodeStringHandle){.id = dialectName})))
@@ -808,11 +816,11 @@ MlirBytecodeStatus mlirBytecodeParseDialectSection(void *callerState,
       mlirBytecodeEmitDebug(
           "\top[%d] = %s (%d) . %s (%d)", (int)op.id,
           mlirBytecodeGetStringSectionValue(
-              callerState, mlirFile, (MlirBytecodeDialectHandle){.id = dialect})
+              callerState, (MlirBytecodeDialectHandle){.id = dialect})
               .data,
           dialect,
           mlirBytecodeGetStringSectionValue(
-              callerState, mlirFile, (MlirBytecodeStringHandle){.id = opName})
+              callerState, (MlirBytecodeStringHandle){.id = opName})
               .data,
           opName);
       // Associate op[index] = {dialect[j], opName}
@@ -935,6 +943,18 @@ mlirBytecodeForEachAttributeAndType(void *callerState,
 MlirBytecodeStatus
 mlirBytecodeForEachResource(void *callerState,
                             MlirBytecodeFile *const mlirFile) {
+
+  enum MlirBytecodeAsmResourceEntryKind {
+    /// A blob of data with an accompanying alignment.
+    kMlirBytecodeResourceEntryBlob,
+    /// A boolean value.
+    kMlirBytecodeResourceEntryBool,
+    /// A string value.
+    kMlirBytecodeResourceEntryString,
+  };
+  typedef enum MlirBytecodeAsmResourceEntryKind
+      MlirBytecodeAsmResourceEntryKind;
+
   const MlirBytecodeBytesRef offsetSection =
       mbci_getSection(mlirFile, mbci_kResourceOffset);
   MlirBytecodeStream offsetPP = mbci_populateParserPosForSection(offsetSection);
@@ -950,20 +970,27 @@ mlirBytecodeForEachResource(void *callerState,
   if (!numExternalResourceGroups)
     return mlirBytecodeSuccess();
 
+  MlirBytecodeStatus ret =
+      mlirBytecodeResourceSectionEnter(callerState, numExternalResourceGroups);
+  if (!mlirBytecodeSucceeded(ret))
+    return ret;
+
   for (uint64_t i = 0; i < numExternalResourceGroups; ++i) {
-    uint64_t groupKey;
-    if (mlirBytecodeFailed(mlirBytecodeParseVarInt(&offsetPP, &groupKey)))
+    MlirBytecodeStringHandle groupKey;
+    if (mlirBytecodeFailed(mlirBytecodeParseHandle(&offsetPP, &groupKey)))
       return mlirBytecodeEmitError("invalid/missing resource group key");
     mlirBytecodeEmitDebug(
         "Group for %s / %d",
-        mlirBytecodeGetStringSectionValue(
-            callerState, mlirFile, (MlirBytecodeStringHandle){.id = groupKey})
-            .data,
+        mlirBytecodeGetStringSectionValue(callerState, groupKey).data,
         numExternalResourceGroups);
 
     uint64_t numResources;
     if (mlirBytecodeFailed(mlirBytecodeParseVarInt(&offsetPP, &numResources)))
       return mlirBytecodeEmitError("invalid/missing number of resources");
+
+    ret = mlirBytecodeResourceGroupEnter(callerState, groupKey, numResources);
+    if (!mlirBytecodeSucceeded(ret))
+      return ret;
 
     for (uint64_t j = 0; j < numResources; ++j) {
       uint64_t resourceKey;
@@ -979,18 +1006,6 @@ mlirBytecodeForEachResource(void *callerState,
       MlirBytecodeAsmResourceEntryKind resKind =
           (MlirBytecodeAsmResourceEntryKind)kind;
       switch (resKind) {
-      case kMlirBytecodeResourceEntryBool: {
-        uint8_t value;
-        if (mlirBytecodeFailed(mlirBytecodeParseByte(&resPP, &value)))
-          return mlirBytecodeEmitError("invalid/missing resource entry");
-        if (mlirBytecodeFailed(mlirBytecodeResourceCallBack(
-                callerState, (MlirBytecodeStringHandle){.id = groupKey},
-                numExternalResourceGroups,
-                (MlirBytecodeStringHandle){.id = resourceKey}, resKind, NULL,
-                &value, NULL)))
-          return mlirBytecodeFailure();
-        break;
-      }
       case kMlirBytecodeResourceEntryBlob: {
         uint64_t alignment;
         if (mlirBytecodeFailed(mlirBytecodeParseVarInt(&resPP, &alignment)))
@@ -1001,23 +1016,29 @@ mlirBytecodeForEachResource(void *callerState,
         if (mlirBytecodeFailed(mbci_alignTo(&resPP, alignment)))
           return mlirBytecodeFailure();
         MlirBytecodeBytesRef blob = {.data = resPP.pos, .length = size};
-        if (mlirBytecodeFailed(mlirBytecodeResourceCallBack(
-                callerState, (MlirBytecodeStringHandle){.id = groupKey},
-                numExternalResourceGroups,
-                (MlirBytecodeStringHandle){.id = resourceKey}, resKind, &blob,
-                NULL, NULL)))
+        if (mlirBytecodeFailed(mlirBytecodeResourceBlobCallBack(
+                callerState, groupKey, (MlirBytecodeStringHandle){.id = resourceKey},
+                blob)))
+          return mlirBytecodeFailure();
+        break;
+      }
+      case kMlirBytecodeResourceEntryBool: {
+        uint8_t value;
+        if (mlirBytecodeFailed(mlirBytecodeParseByte(&resPP, &value)))
+          return mlirBytecodeEmitError("invalid/missing resource entry");
+        if (mlirBytecodeFailed(mlirBytecodeResourceBoolCallBack(
+                callerState, groupKey, (MlirBytecodeStringHandle){.id = resourceKey},
+                value)))
           return mlirBytecodeFailure();
         break;
       }
       case kMlirBytecodeResourceEntryString: {
-        uint64_t value;
-        if (mlirBytecodeFailed(mlirBytecodeParseVarInt(&resPP, &value)))
+        MlirBytecodeStringHandle value;
+        if (mlirBytecodeFailed(mlirBytecodeParseHandle(&resPP, &value)))
           return mlirBytecodeEmitError("invalid/missing resource value");
-        if (mlirBytecodeFailed(mlirBytecodeResourceCallBack(
-                callerState, (MlirBytecodeStringHandle){.id = groupKey},
-                numExternalResourceGroups,
-                (MlirBytecodeStringHandle){.id = resourceKey}, resKind, NULL,
-                NULL, (MlirBytecodeStringHandle *)&value)))
+        if (mlirBytecodeFailed(mlirBytecodeResourceStringCallBack(
+                callerState, groupKey, (MlirBytecodeStringHandle){.id = resourceKey},
+                value)))
           return mlirBytecodeFailure();
         break;
       }
