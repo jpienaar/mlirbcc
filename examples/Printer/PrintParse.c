@@ -293,7 +293,7 @@ mlirBytecodeCreateBuiltinDictionaryAttr(void *callerState,
   MlirBytecodeAttrHandle name;
   MlirBytecodeAttrHandle value;
   while (mlirBytecodeSucceeded(
-      mlirBytecodeGetNextDictionaryHandles(range, &name, &value))) {
+      mlirBytecodeGetNextDictionaryHandles(callerState, range, &name, &value))) {
     MlirBytecodeStatus ret = mlirBytecodeProcessAttribute(callerState, name);
     if (!mlirBytecodeSucceeded(ret))
       return ret;
@@ -567,7 +567,7 @@ static bool hasAttrDict(MlirBytecodeAttrHandle attr) {
   return attr.id == (uint64_t)kMlirBytecodeHandleSentinel;
 }
 
-MlirBytecodeOperationState states[MlirIRSectionStackMaxDepth + 1];
+MlirBytecodeOperationState states[MLIRBC_IR_STACK_MAX_DEPTH + 1];
 int stateDepth;
 
 MlirBytecodeStatus mlirBytecodeOperationStatePush(
@@ -598,8 +598,8 @@ MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
   for (uint64_t i = 0; i < numBlockArgs; ++i) {
     MlirBytecodeTypeHandle type;
     MlirBytecodeAttrHandle loc;
-    if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(stream, &type)) ||
-        !mlirBytecodeSucceeded(mlirBytecodeParseHandle(stream, &loc))) {
+    if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(callerState, stream, &type)) ||
+        !mlirBytecodeSucceeded(mlirBytecodeParseHandle(callerState, stream, &loc))) {
       return mlirBytecodeFailure();
     }
     if (first) {
@@ -671,7 +671,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
     MlirBytecodeStream *stream, uint64_t numResults) {
   MlirBytecodeOperationState *opState = opStateHandle.state;
   opState->types.start = opState->types.pos = stream->pos;
-  MlirBytecodeStatus ret = mlirBytecodeSkipHandles(stream, numResults);
+  MlirBytecodeStatus ret = mlirBytecodeSkipHandles(callerState, stream, numResults);
   opState->types.end = stream->pos;
   return ret;
 }
@@ -681,7 +681,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
     MlirBytecodeStream *stream, uint64_t numOperands) {
   MlirBytecodeOperationState *opState = opStateHandle.state;
   opState->operands.start = opState->operands.pos = stream->pos;
-  MlirBytecodeStatus ret = mlirBytecodeSkipHandles(stream, numOperands);
+  MlirBytecodeStatus ret = mlirBytecodeSkipHandles(callerState, stream, numOperands);
   opState->operands.end = stream->pos;
   return ret;
 }
@@ -701,7 +701,7 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
   MlirBytecodeTypeHandle retTy;
   first = true;
   while (
-      mlirBytecodeSucceeded(mlirBytecodeParseHandle(&opState->types, &retTy))) {
+      mlirBytecodeSucceeded(mlirBytecodeParseHandle(callerState, &opState->types, &retTy))) {
     if (!first)
       printf(", ");
 
@@ -730,7 +730,7 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
   MlirBytecodeOpHandle op;
   first = true;
   while (
-      mlirBytecodeSucceeded(mlirBytecodeParseHandle(&opState->operands, &op))) {
+      mlirBytecodeSucceeded(mlirBytecodeParseHandle(callerState, &opState->operands, &op))) {
     if (first)
       printf("(%%%" PRIu64, (uint64_t)op.id);
     else
@@ -743,7 +743,7 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
   first = true;
   mlirBytecodeStreamReset(&opState->types);
   while (
-      mlirBytecodeSucceeded(mlirBytecodeParseHandle(&opState->types, &retTy))) {
+      mlirBytecodeSucceeded(mlirBytecodeParseHandle(callerState, &opState->types, &retTy))) {
     if (first)
       printf(" : ");
     else
@@ -781,7 +781,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
     printf("// successors");
     for (uint64_t i = 0; i < numSuccessors; ++i) {
       uint64_t index;
-      MlirBytecodeStatus ret = mlirBytecodeParseVarInt(stream, &index);
+      MlirBytecodeStatus ret = mlirBytecodeParseVarInt(callerState, stream, &index);
       if (!mlirBytecodeSucceeded(ret))
         return ret;
       printf(" ^%" PRIu64, index);
@@ -866,27 +866,24 @@ int main(int argc, char **argv) {
 
   int fd = open(argv[1], O_RDONLY);
   if (fd == -1) {
-    return mlirBytecodeEmitError("MlirBytecodeFailed to open file '%s'",
+    return mlirBytecodeEmitError(NULL,"MlirBytecodeFailed to open file '%s'",
                                  argv[1]),
            1;
   }
 
   struct stat fileInfo;
   if (fstat(fd, &fileInfo) == -1) {
-    return mlirBytecodeEmitError("error getting the file size"), 1;
+    return mlirBytecodeEmitError(NULL,"error getting the file size"), 1;
   }
 
   uint8_t *stream =
       (uint8_t *)mmap(0, fileInfo.st_size, PROT_READ, MAP_SHARED, fd, 0);
   if (stream == MAP_FAILED) {
     close(fd);
-    return mlirBytecodeEmitError("error mmapping the file"), 1;
+    return mlirBytecodeEmitError(NULL,"error mmapping the file"), 1;
   }
 
-  MlirBytecodeBytesRef ref = {.data = stream, .length = fileInfo.st_size};
-  MlirBytecodeFile mlirFile = mlirBytecodePopulateFile(ref);
-
-  // Set global state
+  // Set parsing state
   ParsingState state;
   state.attributes = 0;
   state.depth = 0;
@@ -897,9 +894,12 @@ int main(int argc, char **argv) {
   state.strings = 0;
   state.types = 0;
 
+  MlirBytecodeBytesRef ref = {.data = stream, .length = fileInfo.st_size};
+  MlirBytecodeFile mlirFile = mlirBytecodePopulateFile(&state, ref);
+
   if (!mlirBytecodeFileEmpty(&mlirFile) &&
       mlirBytecodeFailed(mlirBytecodeParseFile(&state, ref)))
-    return mlirBytecodeEmitError("MlirBytecodeFailed to parse file"), 1;
+    return mlirBytecodeEmitError(NULL,"MlirBytecodeFailed to parse file"), 1;
 
   if (munmap(stream, fileInfo.st_size) == -1) {
     close(fd);
