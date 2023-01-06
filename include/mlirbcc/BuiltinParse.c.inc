@@ -17,12 +17,14 @@ extern "C" {
 
 // Entry point for Builtin dialect Attribute parsing.
 MlirBytecodeStatus
-mlirBytecodeParseBuiltinAttr(void *callerState, MlirBytecodeAttrHandle attrHandle,
+mlirBytecodeParseBuiltinAttr(void *callerState,
+                             MlirBytecodeAttrHandle attrHandle,
                              MlirBytecodeBytesRef str, bool hasCustom);
 
 // Entry point for Builtin dialect Type parsing.
 MlirBytecodeStatus
-mlirBytecodeParseBuiltinType(void *callerState, MlirBytecodeTypeHandle typeHandle,
+mlirBytecodeParseBuiltinType(void *callerState,
+                             MlirBytecodeTypeHandle typeHandle,
                              MlirBytecodeBytesRef str, bool hasCustom);
 
 // NOTE: this is proof-of-concept and just enough working to show end-to-end.
@@ -38,37 +40,42 @@ static MlirBytecodeStatus mlirBytecodeCreateBuiltinIntegerAttr(
     void *callerState, MlirBytecodeAttrHandle attrHandle,
     MlirBytecodeTypeHandle typeHandle, uint64_t value);
 static MlirBytecodeStatus
-mlirBytecodeCreateBuiltinStrAttr(void *callerState, MlirBytecodeAttrHandle attrHandle,
+mlirBytecodeCreateBuiltinStrAttr(void *callerState,
+                                 MlirBytecodeAttrHandle attrHandle,
                                  MlirBytecodeStringHandle strHdl);
 static MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLoc(
     void *callerState, MlirBytecodeAttrHandle attrHandle,
     MlirBytecodeAttrHandle filename, uint64_t line, uint64_t col);
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinUnknownLoc(
-    void *callerState, MlirBytecodeAttrHandle attrHandle);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinUnknownLoc(void *callerState,
+                                    MlirBytecodeAttrHandle attrHandle);
 
 typedef struct MlirBytecodeHandleIterator MlirDictionaryHandleIterator;
 // Populate the next key and value and increment the iterator.
 // Returns whether there was an element.
-MlirBytecodeStatus
-mlirBytecodeGetNextDictionaryHandles(void* callerState, MlirDictionaryHandleIterator *iterator,
-                                     MlirBytecodeAttrHandle *name,
-                                     MlirBytecodeAttrHandle *value);
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinDictionaryAttr(
-    void *callerState, MlirBytecodeAttrHandle attrHandle,
-    MlirDictionaryHandleIterator *range);
+MlirBytecodeStatus mlirBytecodeGetNextDictionaryHandles(
+    void *callerState, MlirDictionaryHandleIterator *iterator,
+    MlirBytecodeAttrHandle *name, MlirBytecodeAttrHandle *value);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinDictionaryAttr(void *callerState,
+                                        MlirBytecodeAttrHandle attrHandle,
+                                        MlirDictionaryHandleIterator *range);
 
 // Create method for TypeAttr.
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinTypeAttr(
-    void *callerState, MlirBytecodeAttrHandle bcAttrHandle,
-    MlirBytecodeTypeHandle value);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinTypeAttr(void *callerState,
+                                  MlirBytecodeAttrHandle bcAttrHandle,
+                                  MlirBytecodeTypeHandle value);
 
 //===----------------------------------------------------------------------===//
 // Create types.
 
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinFloat32Type(
-    void *callerState, MlirBytecodeTypeHandle typeHandle);
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinIndexType(
-    void *callerState, MlirBytecodeTypeHandle typeHandle);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinFloat32Type(void *callerState,
+                                     MlirBytecodeTypeHandle typeHandle);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinIndexType(void *callerState,
+                                   MlirBytecodeTypeHandle typeHandle);
 
 enum MlirBuiltinSignednessSemantics {
   kBuiltinIntegerTypeSignless, /// No signedness semantics
@@ -82,10 +89,12 @@ static MlirBytecodeStatus mlirBytecodeCreateBuiltinIntegerType(
     MlirBuiltinSignednessSemantics signedness, int width);
 
 // TODO
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinFunctionType(
-    void *callerState, MlirBytecodeTypeHandle typeHandle);
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinRankedTensorType(
-    void *callerState, MlirBytecodeTypeHandle typeHandle);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinFunctionType(void *callerState,
+                                      MlirBytecodeTypeHandle typeHandle);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinRankedTensorType(void *callerState,
+                                          MlirBytecodeTypeHandle typeHandle);
 
 //===----------------------------------------------------------------------===//
 // Query types.
@@ -95,8 +104,9 @@ static MlirBytecodeStatus mlirBytecodeQueryBuiltinIntegerTypeWidth(
     void *callerState, MlirBytecodeTypeHandle typeHandle, unsigned *width);
 
 // Create method for UnknownLocAttr.
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinUnknownLocAttr(
-    void *callerState, MlirBytecodeAttrHandle bcAttrHandle);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinUnknownLocAttr(void *callerState,
+                                        MlirBytecodeAttrHandle bcAttrHandle);
 
 // Create method for FlatSymbolRefAttr.
 static MlirBytecodeStatus mlirBytecodeCreateBuiltinFlatSymbolRefAttr(
@@ -109,9 +119,10 @@ static MlirBytecodeStatus mlirBytecodeCreateBuiltinNameLocAttr(
     MlirBytecodeAttrHandle name, MlirBytecodeAttrHandle childLoc);
 
 // Create method for StringAttr.
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttr(
-    void *callerState, MlirBytecodeAttrHandle bcAttrHandle,
-    MlirBytecodeStringHandle value);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinStringAttr(void *callerState,
+                                    MlirBytecodeAttrHandle bcAttrHandle,
+                                    MlirBytecodeStringHandle value);
 
 // Create method for StringAttrWithType.
 static MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttrWithType(
@@ -119,13 +130,15 @@ static MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttrWithType(
     MlirBytecodeStringHandle value, MlirBytecodeTypeHandle type);
 
 // Create method for TypeAttr.
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinTypeAttr(
-    void *callerState, MlirBytecodeAttrHandle bcAttrHandle,
-    MlirBytecodeTypeHandle value);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinTypeAttr(void *callerState,
+                                  MlirBytecodeAttrHandle bcAttrHandle,
+                                  MlirBytecodeTypeHandle value);
 
 // Create method for UnitAttr.
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinUnitAttr(
-    void *callerState, MlirBytecodeAttrHandle bcAttrHandle);
+static MlirBytecodeStatus
+mlirBytecodeCreateBuiltinUnitAttr(void *callerState,
+                                  MlirBytecodeAttrHandle bcAttrHandle);
 
 // Create method for FileLineColLocAttr.
 static MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLocAttr(
@@ -406,16 +419,18 @@ static MlirBytecodeStatus parseIntegerAttr(void *callerState,
   // is nothing to query the bitwidth of the type except to ask the
   // implementation what width the type handle has.
   unsigned width;
-  MlirBytecodeStatus ret = mlirBytecodeProcessAttribute(callerState, typeHandle);
+  MlirBytecodeStatus ret =
+      mlirBytecodeProcessAttribute(callerState, typeHandle);
   if (!mlirBytecodeSucceeded(ret))
     return ret;
-  ret = mlirBytecodeQueryBuiltinIntegerTypeWidth(callerState, typeHandle, &width);
+  ret =
+      mlirBytecodeQueryBuiltinIntegerTypeWidth(callerState, typeHandle, &width);
   if (!mlirBytecodeHandled(ret))
     return ret;
 
   if (mlirBytecodeFailed(ret))
-    return mlirBytecodeEmitError(callerState,
-        "expected integer or index type for IntegerAttr");
+    return mlirBytecodeEmitError(
+        callerState, "expected integer or index type for IntegerAttr");
 
   // TODO: Handle arbitrary integer sizes.
   if (width > 64)
@@ -425,18 +440,19 @@ static MlirBytecodeStatus parseIntegerAttr(void *callerState,
   int64_t val;
   mlirBytecodeParseSignedVarInt(callerState, pp, &val);
 
-  return mlirBytecodeCreateBuiltinIntegerAttr(callerState, attrHandle, typeHandle,
-                                              val);
+  return mlirBytecodeCreateBuiltinIntegerAttr(callerState, attrHandle,
+                                              typeHandle, val);
 }
 
-MlirBytecodeStatus
-mlirBytecodeGetNextDictionaryHandles(void* callerState, MlirDictionaryHandleIterator *iterator,
-                                     MlirBytecodeAttrHandle *name,
-                                     MlirBytecodeAttrHandle *value) {
-  if (mlirBytecodeFailed(mlirBytecodeParseHandle(callerState, &iterator->stream, name)))
+MlirBytecodeStatus mlirBytecodeGetNextDictionaryHandles(
+    void *callerState, MlirDictionaryHandleIterator *iterator,
+    MlirBytecodeAttrHandle *name, MlirBytecodeAttrHandle *value) {
+  if (mlirBytecodeFailed(
+          mlirBytecodeParseHandle(callerState, &iterator->stream, name)))
     return mlirBytecodeFailure();
-  if (mlirBytecodeFailed(mlirBytecodeParseHandle(callerState, &iterator->stream, value)))
-    return mlirBytecodeEmitError(callerState,"can't parse value");
+  if (mlirBytecodeFailed(
+          mlirBytecodeParseHandle(callerState, &iterator->stream, value)))
+    return mlirBytecodeEmitError(callerState, "can't parse value");
   return mlirBytecodeSuccess();
 }
 
@@ -447,7 +463,8 @@ static MlirBytecodeStatus parseDictionaryAttr(void *callerState,
   if (mlirBytecodeFailed(mlirBytecodeParseVarInt(callerState, pp, &size)))
     return mlirBytecodeFailure();
   MlirDictionaryHandleIterator iterator = {.stream = *pp, .count = size};
-  return mlirBytecodeCreateBuiltinDictionaryAttr(callerState, attrHandle, &iterator);
+  return mlirBytecodeCreateBuiltinDictionaryAttr(callerState, attrHandle,
+                                                 &iterator);
 }
 
 static MlirBytecodeStatus parseFileLineColLoc(void *callerState,
@@ -459,7 +476,8 @@ static MlirBytecodeStatus parseFileLineColLoc(void *callerState,
       mlirBytecodeFailed(mlirBytecodeParseVarInt(callerState, pp, &col)))
     return mlirBytecodeFailure();
   return mlirBytecodeCreateBuiltinFileLineColLoc(
-      callerState, attrHandle, (MlirBytecodeAttrHandle){.id = filename}, line, col);
+      callerState, attrHandle, (MlirBytecodeAttrHandle){.id = filename}, line,
+      col);
 }
 
 static MlirBytecodeStatus parseStringAttr(void *callerState,
@@ -476,26 +494,30 @@ parseStringAttrWithType(void *callerState, MlirBytecodeAttrHandle bcAttrHandle,
                         MlirBytecodeStream *bcStream) {
   MlirBytecodeStringHandle value;
   MlirBytecodeTypeHandle type;
-  if (mlirBytecodeSucceeded(mlirBytecodeParseHandle(callerState, bcStream, &value)) &&
-      mlirBytecodeSucceeded(mlirBytecodeParseHandle(callerState, bcStream, &type))) {
+  if (mlirBytecodeSucceeded(
+          mlirBytecodeParseHandle(callerState, bcStream, &value)) &&
+      mlirBytecodeSucceeded(
+          mlirBytecodeParseHandle(callerState, bcStream, &type))) {
     return mlirBytecodeCreateBuiltinStringAttrWithType(
         callerState, bcAttrHandle, value, type);
   }
-  return mlirBytecodeEmitError(callerState,"invalid StringAttrWithType");
+  return mlirBytecodeEmitError(callerState, "invalid StringAttrWithType");
 }
 
 static MlirBytecodeStatus parseTypeAttr(void *callerState,
                                         MlirBytecodeAttrHandle bcAttrHandle,
                                         MlirBytecodeStream *bcStream) {
   MlirBytecodeTypeHandle value;
-  if (mlirBytecodeSucceeded(mlirBytecodeParseHandle(callerState, bcStream, &value)))
+  if (mlirBytecodeSucceeded(
+          mlirBytecodeParseHandle(callerState, bcStream, &value)))
     return mlirBytecodeCreateBuiltinTypeAttr(callerState, bcAttrHandle, value);
 
-  return mlirBytecodeEmitError(callerState,"invalid TypeAttr");
+  return mlirBytecodeEmitError(callerState, "invalid TypeAttr");
 }
 
 MlirBytecodeStatus
-mlirBytecodeParseBuiltinAttr(void *callerState, MlirBytecodeAttrHandle attrHandle,
+mlirBytecodeParseBuiltinAttr(void *callerState,
+                             MlirBytecodeAttrHandle attrHandle,
                              MlirBytecodeBytesRef str, bool hasCustom) {
   if (!hasCustom)
     return mlirBytecodeUnhandled();
@@ -547,8 +569,8 @@ static MlirBytecodeStatus parseIntegerType(void *callerState,
                                            MlirBytecodeTypeHandle bcTypeHandle,
                                            MlirBytecodeStream *bcStream) {
   uint64_t _widthAndSignedness, signedness, width;
-  if (mlirBytecodeSucceeded(
-          mlirBytecodeParseVarInt(callerState, bcStream, &_widthAndSignedness)) &&
+  if (mlirBytecodeSucceeded(mlirBytecodeParseVarInt(callerState, bcStream,
+                                                    &_widthAndSignedness)) &&
       mlirBytecodeSucceeded(
           ((signedness = _widthAndSignedness & 0x3), mlirBytecodeSuccess())) &&
       mlirBytecodeSucceeded(
@@ -557,7 +579,7 @@ static MlirBytecodeStatus parseIntegerType(void *callerState,
         callerState, bcTypeHandle, (MlirBuiltinSignednessSemantics)signedness,
         width);
   }
-  return mlirBytecodeEmitError(callerState,"invalid IntegerType");
+  return mlirBytecodeEmitError(callerState, "invalid IntegerType");
 }
 
 static MlirBytecodeStatus parseFunctionType(void *callerState,
@@ -575,7 +597,8 @@ parseRankedTensorType(void *callerState, MlirBytecodeAttrHandle typeHandle,
 }
 
 MlirBytecodeStatus
-mlirBytecodeParseBuiltinType(void *callerState, MlirBytecodeTypeHandle typeHandle,
+mlirBytecodeParseBuiltinType(void *callerState,
+                             MlirBytecodeTypeHandle typeHandle,
                              MlirBytecodeBytesRef str, bool hasCustom) {
   mlirBytecodeEmitDebug("type str = %s %d", str.data, hasCustom);
   if (!hasCustom)
