@@ -235,7 +235,6 @@ static bool mlirBytecodeFileEmpty(MlirBytecodeFile *file);
 
 //===----------------------------------------------------------------------===//
 // Dialect parsing utility methods.
-// Note: These should probably go into their own header.
 
 /// Creates a bytecode stream from section of bytes.
 static MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef ref);
@@ -351,7 +350,7 @@ inline static bool mlirBytecodeHandled(MlirBytecodeStatus res) {
 // Bytecode constants.
 // ----
 
-enum ID {
+enum {
   // This section contains strings referenced within the bytecode.
   mbci_kString = 0,
 
@@ -420,7 +419,8 @@ static bool mbci_isSectionOptional(int id) {
 //===----------------------------------------------------------------------===//
 // Default implementations for verbose logging and debugging
 #ifdef MLIRBC_VERBOSE_ERROR
-MlirBytecodeStatus mlirBytecodeEmitErrorImpl(const char *fmt, ...) {
+__attribute__((weak)) MlirBytecodeStatus
+mlirBytecodeEmitErrorImpl(const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
   vfprintf(stderr, fmt, args);
@@ -437,8 +437,8 @@ MlirBytecodeStatus mlirBytecodeEmitErrorImpl(const char *fmt, ...) {
 #endif
 
 #ifdef MLIRBC_DEBUG
-void mlirBytecodeEmitDebugImpl(const char *file, int line, const char *fmt,
-                               ...) {
+__attribute__((weak)) void mlirBytecodeEmitDebugImpl(const char *file, int line,
+                                                     const char *fmt, ...) {
   va_list args;
   fprintf(stderr, "%s:%d: ", file, line);
   va_start(args, fmt);
