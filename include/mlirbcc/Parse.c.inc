@@ -13,7 +13,7 @@
 // parser. It is defined as a pure include-only implementation.
 //
 // Define types and functions required for parsing (see below) and simplest
-// entry point is `mlirBytecodeParseFile`.
+// entry point is `mlirBytecodeParse`.
 //
 // Callbacks/functions to be implemented in instantiation accept an opaque
 // pointer as first argument that gets directly propagated during parsing and
@@ -198,13 +198,14 @@ typedef MlirBytecodeStatus (*MlirBytecodeTypeParseCallBack)(
 /// Returns whether failed.
 static MlirBytecodeStatus
 mlirBytecodeParseAttributeAndTypeSection(void *callerState,
-                                         MlirBytecodeFile *mlirFile);
+                                         MlirBytecodeParserState *parserState);
 
 /// Parses the dialect section, invoking MlirBytecodeDialectCallBack upon
 /// dialect encountered and MlirBytecodeDialectOpCallBack per operation type in
 /// dialect. Returns whether failed.
 static MlirBytecodeStatus
-mlirBytecodeParseDialectSection(void *callerState, MlirBytecodeFile *mlirFile);
+mlirBytecodeParseDialectSection(void *callerState,
+                                MlirBytecodeParserState *parserState);
 
 /// Invoked with opname with its dialect and string handle corresponding to its
 /// name.
@@ -212,7 +213,7 @@ static MlirBytecodeStatus
 mlirBytecodeDialectOpCallBack(void *callerState, MlirBytecodeDialectHandle,
                               MlirBytecodeOpHandle, MlirBytecodeStringHandle);
 
-/// Parse IR section in mlirFile. The block args, operation and region callback
+/// Parse IR section. The block args, operation and region callback
 /// are invoked during bytecode in-order walk. Additionally allows for passing
 /// in an opaque state.
 ///
@@ -222,29 +223,31 @@ mlirBytecodeDialectOpCallBack(void *callerState, MlirBytecodeDialectHandle,
 /// block/region have been processed and so parsing resumes at parent level.
 /// Returns whether failed.
 static MlirBytecodeStatus
-mlirBytecodeParseIRSection(void *callerState, MlirBytecodeFile *mlirFile);
+mlirBytecodeParseIRSection(void *callerState,
+                           MlirBytecodeParserState *parserState);
 
 /// Parse the resource section, calling MlirBytecodeResourceCallBack upon
 /// resources encountered. Returns whether failed.
 static MlirBytecodeStatus
-mlirBytecodeParseResourceSection(void *callerState, MlirBytecodeFile *mlirFile);
+mlirBytecodeParseResourceSection(void *callerState,
+                                 MlirBytecodeParserState *parserState);
 
 //===----------------------------------------------------------------------===//
 // MLIR file parsing methods.
 
-/// Populates the MlirBytecodeFile contents for given in memory bytes.
+/// Populates the MlirBytecodeParserState contents for given in memory bytes.
 /// Returns an empty file if population failed.
-static MlirBytecodeFile mlirBytecodePopulateFile(void *callerState,
-                                                 MlirBytecodeBytesRef bytes);
+static MlirBytecodeParserState
+mlirBytecodePopulateParserState(void *callerState, MlirBytecodeBytesRef bytes);
 
 /// Parses the given MLIR file represented in memory `bytes`, calls the
 /// appropriate callbacks during parsing. This combines the parsing methods
 /// below.
-static MlirBytecodeStatus mlirBytecodeParseFile(void *callerState,
-                                                MlirBytecodeBytesRef bytes);
+static MlirBytecodeStatus mlirBytecodeParse(void *callerState,
+                                            MlirBytecodeBytesRef bytes);
 
-/// Returns whether the given MlirBytecodeFile structure is empty.
-static bool mlirBytecodeFileEmpty(MlirBytecodeFile *file);
+/// Returns whether the given MlirBytecodeParserState structure is empty.
+static bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *file);
 
 //===----------------------------------------------------------------------===//
 // Dialect parsing utility methods.
@@ -415,7 +418,7 @@ enum {
   mbci_kNumSections = 7,
 };
 
-struct MlirBytecodeFile {
+struct MlirBytecodeParserState {
   uint64_t version;
   MlirBytecodeBytesRef producer;
 
@@ -756,16 +759,16 @@ MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes) {
   return ret;
 }
 
-static MlirBytecodeBytesRef mbci_getSection(const MlirBytecodeFile *const file,
-                                            int index) {
+static MlirBytecodeBytesRef
+mbci_getSection(const MlirBytecodeParserState *const file, int index) {
   return file->sectionData[index];
 }
 
 MlirBytecodeStatus
 mlirBytecodeForEachString(void *callerState,
-                          const MlirBytecodeFile *const mlirFile) {
+                          const MlirBytecodeParserState *const parserState) {
   const MlirBytecodeBytesRef stringSection =
-      mbci_getSection(mlirFile, mbci_kString);
+      mbci_getSection(parserState, mbci_kString);
   MlirBytecodeStream stream = mbci_populateStreamForSection(stringSection);
 
   uint64_t numStrings;
@@ -810,10 +813,11 @@ mlirBytecodeForEachString(void *callerState,
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeParseDialectSection(void *callerState,
-                                                   MlirBytecodeFile *mlirFile) {
+MlirBytecodeStatus
+mlirBytecodeParseDialectSection(void *callerState,
+                                MlirBytecodeParserState *parserState) {
   const MlirBytecodeBytesRef dialectSection =
-      mbci_getSection(mlirFile, mbci_kDialect);
+      mbci_getSection(parserState, mbci_kDialect);
   MlirBytecodeStream stream = mbci_populateStreamForSection(dialectSection);
   mlirBytecodeEmitDebug("parsing dialect section of length %ld",
                         dialectSection.length);
@@ -879,13 +883,13 @@ MlirBytecodeStatus mlirBytecodeParseDialectSection(void *callerState,
 
 MlirBytecodeStatus
 mlirBytecodeParseAttributeAndTypeSection(void *callerState,
-                                         MlirBytecodeFile *mlirFile) {
+                                         MlirBytecodeParserState *parserState) {
   const MlirBytecodeBytesRef offsetSection =
-      mbci_getSection(mlirFile, mbci_kAttrTypeOffset);
+      mbci_getSection(parserState, mbci_kAttrTypeOffset);
   MlirBytecodeStream offsetStream =
       mbci_populateStreamForSection(offsetSection);
   const MlirBytecodeBytesRef atSection =
-      mbci_getSection(mlirFile, mbci_kAttrType);
+      mbci_getSection(parserState, mbci_kAttrType);
   MlirBytecodeStream atPP = mbci_populateStreamForSection(atSection);
 
   uint64_t numAttrs, numTypes;
@@ -995,7 +999,7 @@ mlirBytecodeParseAttributeAndTypeSection(void *callerState,
 
 MlirBytecodeStatus
 mlirBytecodeParseResourceSection(void *callerState,
-                                 MlirBytecodeFile *const mlirFile) {
+                                 MlirBytecodeParserState *const parserState) {
 
   enum MlirBytecodeAsmResourceEntryKind {
     /// A blob of data with an accompanying alignment.
@@ -1009,11 +1013,11 @@ mlirBytecodeParseResourceSection(void *callerState,
       MlirBytecodeAsmResourceEntryKind;
 
   const MlirBytecodeBytesRef offsetSection =
-      mbci_getSection(mlirFile, mbci_kResourceOffset);
+      mbci_getSection(parserState, mbci_kResourceOffset);
   MlirBytecodeStream offsetStream =
       mbci_populateStreamForSection(offsetSection);
   const MlirBytecodeBytesRef resSection =
-      mbci_getSection(mlirFile, mbci_kResourceOffset);
+      mbci_getSection(parserState, mbci_kResourceOffset);
   MlirBytecodeStream resPP = mbci_populateStreamForSection(resSection);
 
   uint64_t numExternalResourceGroups;
@@ -1384,9 +1388,10 @@ static MlirBytecodeStatus mbci_parseOperation(void *callerState,
   return ret;
 }
 
-MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
-                                              MlirBytecodeFile *mlirFile) {
-  const MlirBytecodeBytesRef irSection = mbci_getSection(mlirFile, mbci_kIR);
+MlirBytecodeStatus
+mlirBytecodeParseIRSection(void *callerState,
+                           MlirBytecodeParserState *parserState) {
+  const MlirBytecodeBytesRef irSection = mbci_getSection(parserState, mbci_kIR);
   MlirBytecodeStream stream = mbci_populateStreamForSection(irSection);
 
   bool hasArgs;
@@ -1469,14 +1474,15 @@ MlirBytecodeStatus mlirBytecodeParseIRSection(void *callerState,
   return mlirBytecodeSuccess();
 }
 
-bool mlirBytecodeFileEmpty(MlirBytecodeFile *file) {
+bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *file) {
   return file->producer.length == 0;
 }
 
-MlirBytecodeFile mlirBytecodePopulateFile(void *callerState,
-                                          const MlirBytecodeBytesRef bytes) {
-  MlirBytecodeFile ret;
-  memset(&ret, 0, sizeof(MlirBytecodeFile));
+MlirBytecodeParserState
+mlirBytecodePopulateParserState(void *callerState,
+                                const MlirBytecodeBytesRef bytes) {
+  MlirBytecodeParserState ret;
+  memset(&ret, 0, sizeof(MlirBytecodeParserState));
   MlirBytecodeStream stream = mbci_populateStreamForSection(bytes);
 
   const uint8_t *magic;
@@ -1519,25 +1525,27 @@ MlirBytecodeFile mlirBytecodePopulateFile(void *callerState,
   return ret;
 }
 
-MlirBytecodeStatus mlirBytecodeParseFile(void *callerState,
-                                         MlirBytecodeBytesRef bytes) {
-  MlirBytecodeFile mlirFile = mlirBytecodePopulateFile(callerState, bytes);
-  if (mlirBytecodeFileEmpty(&mlirFile))
+MlirBytecodeStatus mlirBytecodeParse(void *callerState,
+                                     MlirBytecodeBytesRef bytes) {
+  MlirBytecodeParserState parserState =
+      mlirBytecodePopulateParserState(callerState, bytes);
+  if (mlirBytecodeParserStateEmpty(&parserState))
     return mlirBytecodeFailure();
 
   // Process the string section first.
-  if (mlirBytecodeFailed(mlirBytecodeForEachString(callerState, &mlirFile)) ||
+  if (mlirBytecodeFailed(
+          mlirBytecodeForEachString(callerState, &parserState)) ||
       // Process the dialect section.
       mlirBytecodeFailed(
-          mlirBytecodeParseDialectSection(callerState, &mlirFile)) ||
+          mlirBytecodeParseDialectSection(callerState, &parserState)) ||
       // Process the resource section if present.
       mlirBytecodeFailed(
-          mlirBytecodeParseResourceSection(callerState, &mlirFile)) ||
+          mlirBytecodeParseResourceSection(callerState, &parserState)) ||
       // Process the attribute and type section.
-      mlirBytecodeFailed(
-          mlirBytecodeParseAttributeAndTypeSection(callerState, &mlirFile)) ||
+      mlirBytecodeFailed(mlirBytecodeParseAttributeAndTypeSection(
+          callerState, &parserState)) ||
       // Finally, process the IR section.
-      mlirBytecodeFailed(mlirBytecodeParseIRSection(callerState, &mlirFile)))
+      mlirBytecodeFailed(mlirBytecodeParseIRSection(callerState, &parserState)))
     return mlirBytecodeFailure();
 
   return mlirBytecodeSuccess();

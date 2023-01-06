@@ -62,7 +62,7 @@ struct MlirBytecodeOpRef {
 typedef struct MlirBytecodeOpRef MlirBytecodeOpRef;
 
 // MLIR file structure.
-typedef struct MlirBytecodeFile MlirBytecodeFile;
+typedef struct MlirBytecodeParserState MlirBytecodeParserState;
 
 // MLIR bytecode stream.
 struct MlirBytecodeStream {
