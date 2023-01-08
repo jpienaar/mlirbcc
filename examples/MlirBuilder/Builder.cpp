@@ -77,8 +77,8 @@ LogicalResult MlirbcDialectBytecodeReader::readVarInt(uint64_t &result) {
 }
 
 LogicalResult MlirbcDialectBytecodeReader::readSignedVarInt(int64_t &result) {
-  return failure(
-      !mlirBytecodeSucceeded(mlirBytecodeParseSignedVarInt(this, &stream, &result)));
+  return failure(!mlirBytecodeSucceeded(
+      mlirBytecodeParseSignedVarInt(this, &stream, &result)));
 }
 
 FailureOr<APInt>
@@ -124,7 +124,8 @@ LogicalResult MlirbcDialectBytecodeReader::readBlob(ArrayRef<char> &result) {
   if (failed(readVarInt(dataSize)))
     return failure();
   const uint8_t *ptr;
-  MlirBytecodeStatus ret = mlirBytecodeParseBytes(this, &stream, dataSize, &ptr);
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseBytes(this, &stream, dataSize, &ptr);
   if (!mlirBytecodeSucceeded(ret))
     return failure();
 
@@ -155,15 +156,16 @@ mlirBytecodeOperationStatePop(void *callerState,
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus
-mlirBytecodeOperationStateAddAttributeDictionary(void *callerState,
-                                        MlirBytecodeOperationStateHandle,
-                                        MlirBytecodeAttrHandle) {
+MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
+    void *callerState, MlirBytecodeOperationStateHandle,
+    MlirBytecodeAttrHandle) {
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
-    void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeHandlesRef types) {
+MlirBytecodeStatus
+mlirBytecodeOperationStateAddResultTypes(void *callerState,
+                                         MlirBytecodeOperationStateHandle,
+                                         MlirBytecodeHandlesRef types) {
   return mlirBytecodeUnhandled();
 }
 
@@ -323,10 +325,12 @@ int main(int argc, char **argv) {
   MLIRContext context;
   auto loc = UnknownLoc::get(&context);
   MlirbcDialectBytecodeReader reader(loc);
-  MlirBytecodeParserState parserState = mlirBytecodePopulateParserState(&reader, ref);
+  MlirBytecodeParserState parserState =
+      mlirBytecodePopulateParserState(&reader, ref);
   if (!mlirBytecodeParserStateEmpty(&parserState)) {
     if (mlirBytecodeFailed(mlirBytecodeParse(&reader, ref)))
-      return mlirBytecodeEmitError(&reader, "MlirBytecodeFailed to parse file"), 1;
+      return mlirBytecodeEmitError(&reader, "MlirBytecodeFailed to parse file"),
+             1;
   }
 
   return 0;

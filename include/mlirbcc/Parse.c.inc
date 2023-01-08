@@ -1108,9 +1108,9 @@ mlirBytecodeParseResourceSection(void *callerState,
         MlirBytecodeBytesRef blob = {.data = resPP.pos, .length = size};
         ret = mlirBytecodeResourceBlobCallBack(
             callerState, groupKey,
-            (MlirBytecodeStringHandle){.id = resourceKey},
-            blob);
-            if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret))) return ret;
+            (MlirBytecodeStringHandle){.id = resourceKey}, blob);
+        if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+          return ret;
         break;
       }
       case kMlirBytecodeResourceEntryBool: {
@@ -1122,7 +1122,8 @@ mlirBytecodeParseResourceSection(void *callerState,
         ret = mlirBytecodeResourceBoolCallBack(
             callerState, groupKey,
             (MlirBytecodeStringHandle){.id = resourceKey}, value);
-        if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret))) return ret;
+        if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+          return ret;
         break;
       }
       case kMlirBytecodeResourceEntryString: {
@@ -1134,7 +1135,8 @@ mlirBytecodeParseResourceSection(void *callerState,
         ret = mlirBytecodeResourceStringCallBack(
             callerState, groupKey,
             (MlirBytecodeStringHandle){.id = resourceKey}, value);
-        if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret))) return ret;
+        if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+          return ret;
         break;
       }
       }
@@ -1318,8 +1320,8 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
     ret = mlirBytecodeParseVarInt(callerState, stream, &numResults);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
-    parserState->handleRange = (MlirBytecodeHandle*)
-        malloc(numResults * sizeof(*parserState->handleRange));
+    parserState->handleRange = (MlirBytecodeHandle *)malloc(
+        numResults * sizeof(*parserState->handleRange));
     for (MlirBytecodeSize i = 0; i < numResults; ++i) {
       ret = mlirBytecodeParseHandle(callerState, stream,
                                     &parserState->handleRange[i]);
