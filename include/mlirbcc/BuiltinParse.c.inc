@@ -50,7 +50,17 @@ static MlirBytecodeStatus
 mlirBytecodeCreateBuiltinUnknownLoc(void *callerState,
                                     MlirBytecodeAttrHandle attrHandle);
 
+// Handle iterator.
+struct MlirBytecodeHandleIterator {
+  // Stream over block args.
+  MlirBytecodeStream stream;
+
+  // Number of handles in stream.
+  const MlirBytecodeSize count;
+};
+typedef struct MlirBytecodeHandleIterator MlirBytecodeHandleIterator;
 typedef struct MlirBytecodeHandleIterator MlirDictionaryHandleIterator;
+
 // Populate the next key and value and increment the iterator.
 // Returns whether there was an element.
 MlirBytecodeStatus mlirBytecodeGetNextDictionaryHandles(

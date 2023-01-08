@@ -24,6 +24,7 @@
 #include <unistd.h>
 
 // Include bytecode parsing implementation.
+#include "mlirbcc/BytecodeTypes.h"
 #include "mlirbcc/Parse.c.inc"
 // Dialects.
 #include "mlirbcc/BuiltinParse.c.inc"
@@ -38,7 +39,7 @@ struct MlirBytecodeOperationState {
   MlirBytecodeOpHandle name;
   MlirBytecodeAttrHandle attrDict;
   MlirBytecodeLocHandle loc;
-  MlirBytecodeStream types;
+  MlirBytecodeHandlesRef types;
   MlirBytecodeStream operands;
   bool isIsolated;
   bool hasRegions;
@@ -581,7 +582,7 @@ MlirBytecodeStatus mlirBytecodeOperationStatePush(
   opState->attrDict.id = kMlirBytecodeHandleSentinel;
   opState->hasRegions = false;
   opState->isIsolated = false;
-  opState->types = (MlirBytecodeStream){.start = 0, .pos = 0, .end = 0};
+  opState->types = (MlirBytecodeHandlesRef){.handles = 0, .length = 0};
   opState->operands = (MlirBytecodeStream){.start = 0, .pos = 0, .end = 0};
 
   return mlirBytecodeSuccess();
@@ -660,7 +661,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateRegionPop(
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeOperationStateAddAttributes(
+MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
     void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeAttrHandle attrs) {
   MlirBytecodeOperationState *opState = opStateHandle.state;
@@ -670,13 +671,11 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddAttributes(
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
     void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
-    MlirBytecodeStream *stream, uint64_t numResults) {
+    MlirBytecodeHandlesRef ref) {
   MlirBytecodeOperationState *opState = opStateHandle.state;
-  opState->types.start = opState->types.pos = stream->pos;
-  MlirBytecodeStatus ret =
-      mlirBytecodeSkipHandles(callerState, stream, numResults);
-  opState->types.end = stream->pos;
-  return ret;
+  opState->types.handles = ref.handles;
+  opState->types.length = ref.length;
+  return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
@@ -704,9 +703,8 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
 
   MlirBytecodeTypeHandle retTy;
   first = true;
-  while (mlirBytecodeSucceeded(
-      mlirBytecodeParseHandle(callerState, &opState->types, &retTy))) {
-    if (!first)
+  for (int i = 0, e = opState->types.length; i < e; ++i) {
+    if (i != 0)
       printf(", ");
 
     printf("%%%d", state->ssaIdStack[state->depth]++);
@@ -745,14 +743,13 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
     printf(")");
 
   first = true;
-  mlirBytecodeStreamReset(&opState->types);
-  while (mlirBytecodeSucceeded(
-      mlirBytecodeParseHandle(callerState, &opState->types, &retTy))) {
-    if (first)
+  for (int i = 0, e = opState->types.length; i < e; ++i) {
+    if (i != 0)
       printf(" : ");
     else
       printf(", ");
 
+    retTy = opState->types.handles[i];
     MlirBytecodeStatus ret = mlirBytecodeProcessType(callerState, retTy);
     if (mlirBytecodeSucceeded(ret))
       printf("%.*s", (int)state->types[retTy.id].length,
