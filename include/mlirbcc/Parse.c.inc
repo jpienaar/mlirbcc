@@ -65,7 +65,7 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePop(
     void *callerState, MlirBytecodeOperationStateHandle);
 
 /// Called for an operation with attributes.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddAttributes(
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
     void *callerState, MlirBytecodeOperationStateHandle,
     MlirBytecodeAttrHandle);
 
@@ -75,8 +75,8 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddAttributes(
 // TODO: Consider making these iterators/for each functors instead of exposing
 // bytestream to avoid mishaps with progressing stream.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
-    void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeStream *,
-    uint64_t numResults);
+    void *callerState, MlirBytecodeOperationStateHandle,
+    MlirBytecodeHandlesRef);
 
 /// Called for operation with operands.
 // Note: This _requires_ that the stream is progressed post the last item before
@@ -423,6 +423,9 @@ struct MlirBytecodeParserState {
   MlirBytecodeBytesRef producer;
 
   MlirBytecodeBytesRef sectionData[mbci_kNumSections];
+
+  MlirBytecodeHandle *handleRange;
+  size_t maxSizeOfRange;
 };
 
 static const char *mbci_sectionIDToString(uint8_t id) {
@@ -1264,9 +1267,10 @@ static MlirBytecodeStatus mbci_parseRegion(void *callerState,
                                 numValues);
 }
 
-static MlirBytecodeStatus mbci_parseOperation(void *callerState,
-                                              MlirBytecodeStream *stream,
-                                              mbci_MlirIRSectionStack *stack) {
+static MlirBytecodeStatus
+mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
+                    MlirBytecodeStream *stream,
+                    mbci_MlirIRSectionStack *stack) {
   enum OpEncodingMask {
     kHasAttrs = 0x01,
     kHasResults = 0x02,
@@ -1301,8 +1305,8 @@ static MlirBytecodeStatus mbci_parseOperation(void *callerState,
             mlirBytecodeParseHandle(callerState, stream, &attrDict))) {
       return mlirBytecodeEmitError(callerState, "invalid op attribute handle");
     }
-    ret =
-        mlirBytecodeOperationStateAddAttributes(callerState, cur->op, attrDict);
+    ret = mlirBytecodeOperationStateAddAttributeDictionary(callerState, cur->op,
+                                                           attrDict);
     if (!mlirBytecodeSucceeded(ret))
       return mlirBytecodeEmitDebug("unable to add attributes"), ret;
   }
@@ -1310,19 +1314,23 @@ static MlirBytecodeStatus mbci_parseOperation(void *callerState,
   // Parsing all the variadic sizes.
   if (encodingMask & kHasResults) {
     uint64_t numResults = 0;
-    if (mlirBytecodeSucceeded(
-            mlirBytecodeParseVarInt(callerState, stream, &numResults))) {
-#ifndef NDEBUG
-      MlirBytecodeStream expectedEnd = *stream;
-#endif
-      ret = mlirBytecodeOperationStateAddResultTypes(callerState, cur->op,
-                                                     stream, numResults);
+    ret = mlirBytecodeParseVarInt(callerState, stream, &numResults);
+    if (!mlirBytecodeSucceeded(ret))
+      return ret;
+    parserState->handleRange =
+        malloc(numResults * sizeof(*parserState->handleRange));
+    for (MlirBytecodeSize i = 0; i < numResults; ++i) {
+      ret = mlirBytecodeParseHandle(callerState, stream,
+                                    &parserState->handleRange[i]);
       if (!mlirBytecodeSucceeded(ret))
-        return mlirBytecodeEmitError(callerState, "invalid result type"), ret;
-      MLIRBC_AFTER(expectedEnd, stream, numResults);
-    } else {
-      return mlirBytecodeEmitError(callerState, "invalid number of results");
+        return ret;
     }
+    ret = mlirBytecodeOperationStateAddResultTypes(
+        callerState, cur->op,
+        (MlirBytecodeHandlesRef){.handles = parserState->handleRange,
+                                 .length = numResults});
+    if (!mlirBytecodeSucceeded(ret))
+      return ret;
   }
 
   if (encodingMask & kHasOperands) {
@@ -1408,7 +1416,7 @@ mlirBytecodeParseIRSection(void *callerState,
 
   // Initialize with parsing of top-level.
   mbci_MlirIRSectionStack stack = {.top = -1};
-  mbci_parseOperation(callerState, &stream, &stack);
+  mbci_parseOperation(callerState, parserState, &stream, &stack);
 
   while (stack.top != -1) {
     mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(&stack);
@@ -1467,7 +1475,7 @@ mlirBytecodeParseIRSection(void *callerState,
         (int)mbci_getStackTop(&stack)->numRegionsRemaining,
         (int)mbci_getStackTop(&stack)->numBlocksRemaining,
         (int)mbci_getStackTop(&stack)->numOpsRemaining);
-    ret = mbci_parseOperation(callerState, &stream, &stack);
+    ret = mbci_parseOperation(callerState, parserState, &stream, &stack);
     if (!mlirBytecodeSucceeded(ret))
       return ret;
   }

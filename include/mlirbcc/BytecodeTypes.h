@@ -53,6 +53,14 @@ struct MlirBytecodeBytesRef {
 };
 typedef struct MlirBytecodeBytesRef MlirBytecodeBytesRef;
 
+struct MlirBytecodeHandlesRef {
+  // Pointer to the start memory address.
+  const MlirBytecodeHandle *handles;
+  // Length of the fragment.
+  size_t length;
+};
+typedef struct MlirBytecodeHandlesRef MlirBytecodeHandlesRef;
+
 struct MlirBytecodeOpRef {
   // Handle to op dialect.
   MlirBytecodeDialectHandle dialect;
@@ -72,16 +80,7 @@ struct MlirBytecodeStream {
 };
 typedef struct MlirBytecodeStream MlirBytecodeStream;
 
-// Handle iterator.
-struct MlirBytecodeHandleIterator {
-  // Stream over block args.
-  MlirBytecodeStream stream;
-
-  // Number of handles in stream.
-  const MlirBytecodeSize count;
-};
-typedef struct MlirBytecodeHandleIterator MlirBytecodeHandleIterator;
-
+// TODO: Should this even be here? Perhaps APInt is not part of this level.
 struct MlirBytecodeAPInt {
   // If bitWidth <= 64 then value is populated, else
   union {
