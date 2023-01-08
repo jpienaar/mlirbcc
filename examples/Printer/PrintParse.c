@@ -820,7 +820,6 @@ MlirBytecodeStatus
 mlirBytecodeResourceGroupEnter(void *callerState,
                                MlirBytecodeStringHandle groupKey,
                                MlirBytecodeSize numResources) {
-  ParsingState *state = callerState;
   printf("\tgroup '%s'\n",
          mlirBytecodeGetStringSectionValue(callerState, groupKey).data);
   return mlirBytecodeSuccess();
@@ -829,7 +828,6 @@ mlirBytecodeResourceGroupEnter(void *callerState,
 MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
     void *callerState, MlirBytecodeStringHandle groupKey,
     MlirBytecodeStringHandle resourceKey, MlirBytecodeBytesRef blob) {
-  ParsingState *state = callerState;
   printf("\t\tblob size(resource %s. %s) = %ld\n",
          mlirBytecodeGetStringSectionValue(callerState, groupKey).data,
          mlirBytecodeGetStringSectionValue(callerState, resourceKey).data,
@@ -840,8 +838,6 @@ MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
 MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
     void *callerState, MlirBytecodeStringHandle groupKey,
     MlirBytecodeStringHandle resourceKey, uint8_t boolResource) {
-  ParsingState *state = callerState;
-
   printf("\t\tbool resource %s. %s = %d\n",
          mlirBytecodeGetStringSectionValue(callerState, groupKey).data,
          mlirBytecodeGetStringSectionValue(callerState, resourceKey).data,
@@ -852,7 +848,6 @@ MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
 MlirBytecodeStatus mlirBytecodeResourceStringCallBack(
     void *callerState, MlirBytecodeStringHandle groupKey,
     MlirBytecodeStringHandle resourceKey, MlirBytecodeStringHandle strHandle) {
-  ParsingState *state = callerState;
   printf("\t\tstring resource %s. %s = %s\n",
          mlirBytecodeGetStringSectionValue(callerState, groupKey).data,
          mlirBytecodeGetStringSectionValue(callerState, resourceKey).data,

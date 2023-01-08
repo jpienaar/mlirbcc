@@ -384,6 +384,14 @@ extern void mlirBytecodeEmitDebugImpl(const char *file, int line,
 #define mlirBytecodeEmitError(callerState, ...) mlirBytecodeFailure()
 #endif
 
+#if __has_builtin(__builtin_expect) || defined(__GNUC__)
+#define MLIRBC_LIKELY(EXPR) __builtin_expect((bool)(EXPR), true)
+#define MLIRBC_UNLIKELY(EXPR) __builtin_expect((bool)(EXPR), false)
+#else
+#define MLIRBC_LIKELY(EXPR) (EXPR)
+#define MLIRBC_UNLIKELY(EXPR) (EXPR)
+#endif
+
 // ----
 // Bytecode constants.
 // ----
@@ -507,7 +515,7 @@ static bool mbci_streamEmpty(MlirBytecodeStream *stream) {
 static MlirBytecodeStatus mlirBytecodeParseByte(void *callerState,
                                                 MlirBytecodeStream *stream,
                                                 uint8_t *val) {
-  if (mbci_streamEmpty(stream))
+  if (MLIRBC_UNLIKELY(mbci_streamEmpty(stream)))
     return mlirBytecodeFailure();
   *val = *stream->pos++;
   return mlirBytecodeSuccess();
@@ -519,7 +527,7 @@ static MlirBytecodeStatus mlirBytecodeParseBytes(void *callerState,
                                                  const uint8_t **result) {
   *result = stream->pos;
   stream->pos += n;
-  if (stream->pos > stream->end)
+  if (MLIRBC_UNLIKELY(stream->pos > stream->end))
     return mlirBytecodeFailure();
   return mlirBytecodeSuccess();
 }
@@ -527,7 +535,7 @@ static MlirBytecodeStatus mlirBytecodeParseBytes(void *callerState,
 static MlirBytecodeStatus mbci_skipBytes(void *callerState,
                                          MlirBytecodeStream *stream, size_t n) {
   stream->pos += n;
-  if (stream->pos > stream->end)
+  if (MLIRBC_UNLIKELY(stream->pos > stream->end))
     return mlirBytecodeFailure();
   return mlirBytecodeSuccess();
 }
@@ -536,10 +544,12 @@ static MlirBytecodeStatus
 mbci_skipVarInts(void *callerState, MlirBytecodeStream *stream, size_t n) {
   for (size_t i = 0; i < n; ++i) {
     uint8_t head;
-    if (mlirBytecodeFailed(mlirBytecodeParseByte(callerState, stream, &head)))
+    MlirBytecodeStatus ret = mlirBytecodeParseByte(callerState, stream, &head);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeFailure();
-    int numBytes = (head == 0) ? 8 : __builtin_ctz(head);
-    if (mlirBytecodeFailed(mbci_skipBytes(callerState, stream, numBytes)))
+    int numBytes = (MLIRBC_UNLIKELY(head == 0)) ? 8 : __builtin_ctz(head);
+    ret = mbci_skipBytes(callerState, stream, numBytes);
+    if (mlirBytecodeFailed(ret))
       return mlirBytecodeFailure();
   }
   return mlirBytecodeSuccess();
@@ -576,22 +586,11 @@ MlirBytecodeStatus mlirBytecodeParseVarInt(void *callerState,
     return mlirBytecodeSuccess();
   }
 
-  if (*result == 0) {
-    const uint8_t *res;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseBytes(callerState, stream, sizeof(*result), &res)))
-      return mlirBytecodeFailure();
-    uint8_t *ptr = (uint8_t *)(result);
-    for (int i = 0, e = sizeof(*result); i < e; ++i)
-      ptr[i] = res[i];
-    return mlirBytecodeSuccess();
-  }
-
-  // Parse in the remaining bytes of the value.
-  uint32_t numBytes = __builtin_ctz(*result);
+  uint32_t numBytes = (MLIRBC_UNLIKELY(head == 0)) ? 8 : __builtin_ctz(head);
   const uint8_t *res;
-  if (mlirBytecodeFailed(
-          mlirBytecodeParseBytes(callerState, stream, numBytes, &res)))
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseBytes(callerState, stream, numBytes, &res);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeFailure();
   uint8_t *ptr = (uint8_t *)(result) + 1;
   for (uint32_t i = 0; i < numBytes; ++i)
@@ -600,14 +599,15 @@ MlirBytecodeStatus mlirBytecodeParseVarInt(void *callerState,
   // Shift out the low-order bits that were used to mark how the value was
   // encoded.
   *result >>= (numBytes + 1);
-  return mlirBytecodeSuccess();
+  return ret;
 }
 
 MlirBytecodeStatus mlirBytecodeParseVarIntWithFlag(void *callerState,
                                                    MlirBytecodeStream *stream,
                                                    uint64_t *result,
                                                    bool *flag) {
-  if (mlirBytecodeFailed(mlirBytecodeParseVarInt(callerState, stream, result)))
+  MlirBytecodeStatus ret = mlirBytecodeParseVarInt(callerState, stream, result);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeFailure();
   *flag = *result & 1;
   *result >>= 1;
@@ -617,8 +617,9 @@ MlirBytecodeStatus mlirBytecodeParseVarIntWithFlag(void *callerState,
 MlirBytecodeStatus mlirBytecodeParseSignedVarInt(void *callerState,
                                                  MlirBytecodeStream *stream,
                                                  int64_t *result) {
-  if (mlirBytecodeFailed(
-          mlirBytecodeParseVarInt(callerState, stream, (uint64_t *)result)))
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseVarInt(callerState, stream, (uint64_t *)result);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeFailure();
   *result = (*result >> 1) ^ (~(*result & 1) + 1);
   return mlirBytecodeSuccess();
@@ -644,7 +645,7 @@ MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
   // Large values up to 64 bits are encoded using a single varint.
   if (bitWidth <= 64) {
     ret = mlirBytecodeParseSignedVarInt(callerState, stream, &result->U.value);
-    if (!mlirBytecodeSucceeded(ret))
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
     return mlirBytecodeSuccess();
   }
@@ -653,7 +654,7 @@ MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
   // the value.
   uint64_t numActiveWords;
   ret = mlirBytecodeParseVarInt(callerState, stream, &numActiveWords);
-  if (!mlirBytecodeSucceeded(ret))
+  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
 
   // FIXME: This is
@@ -661,7 +662,7 @@ MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
   for (uint64_t i = 0; i < numActiveWords; ++i) {
     ret = mlirBytecodeParseSignedVarInt(callerState, stream,
                                         (int64_t *)&result->U.data[i]);
-    if (!mlirBytecodeSucceeded(ret))
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
   return mlirBytecodeSuccess();
@@ -672,7 +673,7 @@ static MlirBytecodeStatus mbci_alignTo(void *callerState,
                                        MlirBytecodeStream *stream,
                                        uint32_t alignment) {
   bool isPowerOf2 = (alignment != 0) && ((alignment & (alignment - 1)) == 0);
-  if (!isPowerOf2)
+  if (MLIRBC_UNLIKELY(!isPowerOf2))
     return mlirBytecodeEmitError(callerState,
                                  "expected alignment to be a power-of-two");
 
@@ -682,8 +683,8 @@ static MlirBytecodeStatus mbci_alignTo(void *callerState,
   // Shift the reader position to the next alignment boundary.
   while ((uintptr_t)stream->pos & ((uintptr_t)alignment - 1)) {
     uint8_t padding;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseByte(callerState, stream, &padding)))
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(
+            mlirBytecodeParseByte(callerState, stream, &padding))))
       return mlirBytecodeFailure();
     if (padding != kAlignmentByte) {
       return mlirBytecodeEmitError(
@@ -702,16 +703,19 @@ mbci_parseSections(void *callerState, MlirBytecodeStream *stream,
                    MlirBytecodeBytesRef sectionData[mbci_kNumSections]) {
   uint8_t byte;
   uint64_t length;
-  if (mlirBytecodeFailed(mlirBytecodeParseByte(callerState, stream, &byte)) ||
-      mlirBytecodeFailed(mlirBytecodeParseVarInt(callerState, stream, &length)))
-    return mlirBytecodeFailure();
+  MlirBytecodeStatus ret = mlirBytecodeParseByte(callerState, stream, &byte);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+    return ret;
+  ret = mlirBytecodeParseVarInt(callerState, stream, &length);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+    return ret;
   uint8_t sectionID = byte & 0x7f;
 
   mlirBytecodeEmitDebug("parsing %d of %lld", sectionID, length);
-  if (sectionID >= mbci_kNumSections)
+  if (MLIRBC_UNLIKELY(sectionID >= mbci_kNumSections))
     return mlirBytecodeEmitError(callerState, "invalid section ID: %d",
                                  sectionID);
-  if (sectionData[sectionID].data != NULL) {
+  if (MLIRBC_UNLIKELY(sectionData[sectionID].data != NULL)) {
     return mlirBytecodeEmitError(callerState, "duplicate top-level section: %s",
                                  mbci_sectionIDToString(sectionID));
   }
@@ -719,10 +723,12 @@ mbci_parseSections(void *callerState, MlirBytecodeStream *stream,
   bool isAligned = byte >> 7;
   if (isAligned) {
     uint64_t alignment;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseVarInt(callerState, stream, &alignment)) ||
-        mlirBytecodeFailed(mbci_alignTo(callerState, stream, alignment)))
-      return mlirBytecodeFailure();
+    ret = mlirBytecodeParseVarInt(callerState, stream, &alignment);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+      return ret;
+    ret = mbci_alignTo(callerState, stream, alignment);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+      return ret;
   }
 
   sectionData[sectionID].data = stream->pos;
@@ -735,7 +741,7 @@ MlirBytecodeStatus mlirBytecodeParseNullTerminatedString(
   const uint8_t *startIt = (const uint8_t *)stream->pos;
   const uint8_t *nulIt =
       (const uint8_t *)memchr(startIt, 0, stream->end - stream->pos);
-  if (!nulIt) {
+  if (MLIRBC_UNLIKELY(!nulIt)) {
     return mlirBytecodeEmitError(
         callerState,
         "malformed null-terminated string, no null character found");
@@ -775,8 +781,9 @@ mlirBytecodeForEachString(void *callerState,
   MlirBytecodeStream stream = mbci_populateStreamForSection(stringSection);
 
   uint64_t numStrings;
-  if (mlirBytecodeFailed(
-          mlirBytecodeParseVarInt(callerState, &stream, &numStrings)))
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseVarInt(callerState, &stream, &numStrings);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(callerState,
                                  "failed to parse number of strings");
 
@@ -785,11 +792,11 @@ mlirBytecodeForEachString(void *callerState,
   size_t stringDataEndOffset = stringSection.length;
   for (uint64_t i = numStrings; i > 0; --i) {
     uint64_t stringSize;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseVarInt(callerState, &stream, &stringSize)))
+    ret = mlirBytecodeParseVarInt(callerState, &stream, &stringSize);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeEmitError(
           callerState, "failed to parse string size of string %d", i - 1);
-    if (stringDataEndOffset < stringSize) {
+    if (MLIRBC_UNLIKELY(stringDataEndOffset < stringSize)) {
       return mlirBytecodeEmitError(
           callerState, "string size exceeds the available data size");
     }
@@ -799,16 +806,16 @@ mlirBytecodeForEachString(void *callerState,
     MlirBytecodeBytesRef str;
     str.data = stringSection.data + stringOffset;
     str.length = stringSize - 1;
-    if (mlirBytecodeFailed(mlirBytecodeStringCallBack(
-            callerState, (MlirBytecodeStringHandle){.id = i - 1}, numStrings,
-            str)))
+    ret = mlirBytecodeStringCallBack(
+        callerState, (MlirBytecodeStringHandle){.id = i - 1}, numStrings, str);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeEmitError(callerState, "string callback failed");
     stringDataEndOffset = stringOffset;
   }
 
   // Check that the only remaining data was for the strings, i.e. the reader
   // should be at the same offset as the first string.
-  if (stream.pos != (stream.start + stringDataEndOffset)) {
+  if (MLIRBC_UNLIKELY(stream.pos != (stream.start + stringDataEndOffset))) {
     return mlirBytecodeEmitError(
         callerState, "unexpected trailing data between the offsets for strings "
                      "and their data");
@@ -826,16 +833,17 @@ mlirBytecodeParseDialectSection(void *callerState,
                         dialectSection.length);
 
   uint64_t numDialects;
-  if (mlirBytecodeFailed(
-          mlirBytecodeParseVarInt(callerState, &stream, &numDialects)))
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseVarInt(callerState, &stream, &numDialects);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(callerState,
                                  "unable to parse number of dialects");
   mlirBytecodeEmitDebug("number of dialects = %d", numDialects);
 
   uint64_t dialectName;
   for (uint64_t i = 0; i < numDialects; ++i) {
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseVarInt(callerState, &stream, &dialectName)))
+    ret = mlirBytecodeParseVarInt(callerState, &stream, &dialectName);
+    if (mlirBytecodeFailed(ret))
       return mlirBytecodeEmitError(callerState, "unable to parse dialect %d",
                                    i);
     mlirBytecodeEmitDebug(
@@ -858,8 +866,8 @@ mlirBytecodeParseDialectSection(void *callerState,
     mlirBytecodeEmitDebug("parsing for dialect %d %d ops", dialect, numOpNames);
     for (uint64_t j = 0; j < numOpNames; ++j) {
       uint64_t opName;
-      if (mlirBytecodeFailed(
-              mlirBytecodeParseVarInt(callerState, &stream, &opName)))
+      ret = mlirBytecodeParseVarInt(callerState, &stream, &opName);
+      if (mlirBytecodeFailed(ret))
         return mlirBytecodeEmitError(callerState, "failed to parse op name");
       mlirBytecodeEmitDebug(
           "\top[%d] = %s (%d) . %s (%d)", (int)op.id,
@@ -872,10 +880,10 @@ mlirBytecodeParseDialectSection(void *callerState,
               .data,
           opName);
       // Associate op[index] = {dialect[j], opName}
-      MlirBytecodeStatus ret = mlirBytecodeDialectOpCallBack(
+      ret = mlirBytecodeDialectOpCallBack(
           callerState, op, (MlirBytecodeDialectHandle){.id = dialect},
           (MlirBytecodeStringHandle){.id = opName});
-      if (!mlirBytecodeSucceeded(ret))
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
       ++op.id;
     }
@@ -896,10 +904,12 @@ mlirBytecodeParseAttributeAndTypeSection(void *callerState,
   MlirBytecodeStream atPP = mbci_populateStreamForSection(atSection);
 
   uint64_t numAttrs, numTypes;
-  if (mlirBytecodeFailed(
-          mlirBytecodeParseVarInt(callerState, &offsetStream, &numAttrs)) ||
-      mlirBytecodeFailed(
-          mlirBytecodeParseVarInt(callerState, &offsetStream, &numTypes)))
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseVarInt(callerState, &offsetStream, &numAttrs);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+    return mlirBytecodeEmitError(callerState, "invalid number of attributes");
+  ret = mlirBytecodeParseVarInt(callerState, &offsetStream, &numTypes);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(callerState,
                                  "invalid number of attributes or types");
   mlirBytecodeEmitDebug("parsing %ld attributes and %ld types", numAttrs,
@@ -908,42 +918,43 @@ mlirBytecodeParseAttributeAndTypeSection(void *callerState,
   uint64_t i = 0;
   while (i < numAttrs) {
     uint64_t dialect;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseVarInt(callerState, &offsetStream, &dialect)))
+    ret = mlirBytecodeParseVarInt(callerState, &offsetStream, &dialect);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeEmitError(
           callerState, "invalid dialect handle while parsing attributes");
 
     uint64_t numElements;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseVarInt(callerState, &offsetStream, &numElements)))
+    ret = mlirBytecodeParseVarInt(callerState, &offsetStream, &numElements);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeEmitError(
           callerState, "invalid number of elements in attr offset group");
 
     for (uint64_t j = 0; j < numElements; ++j) {
       uint64_t length;
       bool hasCustomEncoding;
-      if (mlirBytecodeFailed(mlirBytecodeParseVarIntWithFlag(
-              callerState, &offsetStream, &length, &hasCustomEncoding)))
+      ret = mlirBytecodeParseVarIntWithFlag(callerState, &offsetStream, &length,
+                                            &hasCustomEncoding);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
         return mlirBytecodeEmitError(callerState, "invalid attr offset");
 
       MlirBytecodeBytesRef attr = {.data = atPP.pos, .length = length};
 
       // Verify that the offset is actually valid.
-      if (atPP.pos + length > atPP.end) {
+      if (MLIRBC_UNLIKELY(atPP.pos + length > atPP.end)) {
         return mlirBytecodeEmitError(
             callerState,
             "attribute or Type entry offset points past the end of section");
       }
 
       // Parse & associate dialect.attr[j] with `attr`
-      MlirBytecodeStatus ret = mlirBytecodeAttrCallBack(
+      ret = mlirBytecodeAttrCallBack(
           callerState, (MlirBytecodeAttrHandle){.id = i++}, numAttrs,
           (MlirBytecodeDialectHandle){.id = dialect}, attr, hasCustomEncoding);
-      if (mlirBytecodeFailed(ret)) {
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
         mlirBytecodeEmitDebug("attr callback failed");
         return ret;
       }
-      if (mlirBytecodeInterrupted(ret))
+      if (MLIRBC_UNLIKELY(mlirBytecodeInterrupted(ret)))
         return ret;
       // Unhandled attributes are not considered error.
 
@@ -955,44 +966,46 @@ mlirBytecodeParseAttributeAndTypeSection(void *callerState,
   i = 0;
   while (i < numTypes) {
     uint64_t dialect;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseVarInt(callerState, &offsetStream, &dialect)))
+    ret = mlirBytecodeParseVarInt(callerState, &offsetStream, &dialect);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeEmitError(
           callerState, "invalid dialect handle while parsing types");
 
     uint64_t numElements;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseVarInt(callerState, &offsetStream, &numElements)))
+    ret = mlirBytecodeParseVarInt(callerState, &offsetStream, &numElements);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeEmitError(
           callerState, "invalid number of elements in type offset group");
 
     for (uint64_t j = 0; j < numElements; ++j) {
       uint64_t offset;
       bool hasCustomEncoding;
-      if (mlirBytecodeFailed(mlirBytecodeParseVarIntWithFlag(
-              callerState, &offsetStream, &offset, &hasCustomEncoding)))
+      ret = mlirBytecodeParseVarIntWithFlag(callerState, &offsetStream, &offset,
+                                            &hasCustomEncoding);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
         return mlirBytecodeEmitError(callerState, "invalid type offset");
 
       MlirBytecodeBytesRef type = {.data = atPP.pos, .length = offset};
       // Verify that the offset is actually valid.
-      if (atPP.pos + offset > atPP.end) {
+      if (MLIRBC_UNLIKELY(atPP.pos + offset > atPP.end)) {
         return mlirBytecodeEmitError(
             callerState,
             "Attribute or Type entry offset points past the end of section");
       }
 
-      MlirBytecodeStatus ret = mlirBytecodeTypeCallBack(
+      ret = mlirBytecodeTypeCallBack(
           callerState, (MlirBytecodeTypeHandle){.id = i++}, numTypes,
           (MlirBytecodeDialectHandle){.id = dialect}, type, hasCustomEncoding);
-      if (mlirBytecodeFailed(ret)) {
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
         mlirBytecodeEmitDebug("attr callback failed");
         return ret;
       }
-      if (mlirBytecodeInterrupted(ret))
+      if (MLIRBC_UNLIKELY(mlirBytecodeInterrupted(ret)))
         return ret;
       // Unhandled attributes are not considered error.
 
-      if (mlirBytecodeFailed(mbci_skipBytes(callerState, &atPP, offset)))
+      ret = mbci_skipBytes(callerState, &atPP, offset);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
         return mlirBytecodeEmitError(callerState, "invalid type offset");
     }
   }
@@ -1024,53 +1037,54 @@ mlirBytecodeParseResourceSection(void *callerState,
   MlirBytecodeStream resPP = mbci_populateStreamForSection(resSection);
 
   uint64_t numExternalResourceGroups;
-  if (mlirBytecodeFailed(mlirBytecodeParseVarInt(callerState, &offsetStream,
-                                                 &numExternalResourceGroups)))
+  MlirBytecodeStatus ret = mlirBytecodeParseVarInt(callerState, &offsetStream,
+                                                   &numExternalResourceGroups);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(
         callerState, "invalid/missing number of external resource groups");
   if (!numExternalResourceGroups)
     return mlirBytecodeSuccess();
 
-  MlirBytecodeStatus ret =
+  ret =
       mlirBytecodeResourceSectionEnter(callerState, numExternalResourceGroups);
-  if (!mlirBytecodeSucceeded(ret))
+  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
 
   for (uint64_t i = 0; i < numExternalResourceGroups; ++i) {
     MlirBytecodeStringHandle groupKey;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseHandle(callerState, &offsetStream, &groupKey)))
-      return mlirBytecodeEmitError(callerState,
-                                   "invalid/missing resource group key");
+    ret = mlirBytecodeParseHandle(callerState, &offsetStream, &groupKey);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+      return mlirBytecodeEmitError(callerState, "invalid/missing "
+                                                "resource group key");
     mlirBytecodeEmitDebug(
         "Group for %s / %d",
         mlirBytecodeGetStringSectionValue(callerState, groupKey).data,
         numExternalResourceGroups);
 
     uint64_t numResources;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseVarInt(callerState, &offsetStream, &numResources)))
+    ret = mlirBytecodeParseVarInt(callerState, &offsetStream, &numResources);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeEmitError(callerState,
                                    "invalid/missing number of resources");
 
     ret = mlirBytecodeResourceGroupEnter(callerState, groupKey, numResources);
-    if (!mlirBytecodeSucceeded(ret))
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
 
     for (uint64_t j = 0; j < numResources; ++j) {
       uint64_t resourceKey;
-      if (mlirBytecodeFailed(mlirBytecodeParseVarInt(callerState, &offsetStream,
-                                                     &resourceKey)))
+      ret = mlirBytecodeParseVarInt(callerState, &offsetStream, &resourceKey);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
         return mlirBytecodeEmitError(callerState,
                                      "invalid/missing resource key");
       uint64_t size;
-      if (mlirBytecodeFailed(
-              mlirBytecodeParseVarInt(callerState, &offsetStream, &size)))
+      ret = mlirBytecodeParseVarInt(callerState, &offsetStream, &size);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
         return mlirBytecodeEmitError(callerState,
                                      "invalid/missing resource size");
       uint8_t kind;
-      if (mlirBytecodeFailed(
-              mlirBytecodeParseByte(callerState, &offsetStream, &kind)))
+      ret = mlirBytecodeParseByte(callerState, &offsetStream, &kind);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
         return mlirBytecodeEmitError(callerState,
                                      "invalid/missing resource kind");
 
@@ -1079,46 +1093,48 @@ mlirBytecodeParseResourceSection(void *callerState,
       switch (resKind) {
       case kMlirBytecodeResourceEntryBlob: {
         uint64_t alignment;
-        if (mlirBytecodeFailed(
-                mlirBytecodeParseVarInt(callerState, &resPP, &alignment)))
+        ret = mlirBytecodeParseVarInt(callerState, &resPP, &alignment);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
           return mlirBytecodeEmitError(callerState,
                                        "invalid/missing resource alignment");
         uint64_t size;
-        if (mlirBytecodeFailed(
-                mlirBytecodeParseVarInt(callerState, &resPP, &size)))
+        ret = mlirBytecodeParseVarInt(callerState, &resPP, &size);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
           return mlirBytecodeEmitError(callerState,
                                        "invalid/missing resource size");
-        if (mlirBytecodeFailed(mbci_alignTo(callerState, &resPP, alignment)))
+        ret = mbci_alignTo(callerState, &resPP, alignment);
+        if (mlirBytecodeFailed(ret))
           return mlirBytecodeFailure();
         MlirBytecodeBytesRef blob = {.data = resPP.pos, .length = size};
-        if (mlirBytecodeFailed(mlirBytecodeResourceBlobCallBack(
-                callerState, groupKey,
-                (MlirBytecodeStringHandle){.id = resourceKey}, blob)))
-          return mlirBytecodeFailure();
+        ret = mlirBytecodeResourceBlobCallBack(
+            callerState, groupKey,
+            (MlirBytecodeStringHandle){.id = resourceKey},
+            blob);
+            if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret))) return ret;
         break;
       }
       case kMlirBytecodeResourceEntryBool: {
         uint8_t value;
-        if (mlirBytecodeFailed(
-                mlirBytecodeParseByte(callerState, &resPP, &value)))
+        ret = mlirBytecodeParseByte(callerState, &resPP, &value);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
           return mlirBytecodeEmitError(callerState,
                                        "invalid/missing resource entry");
-        if (mlirBytecodeFailed(mlirBytecodeResourceBoolCallBack(
-                callerState, groupKey,
-                (MlirBytecodeStringHandle){.id = resourceKey}, value)))
-          return mlirBytecodeFailure();
+        ret = mlirBytecodeResourceBoolCallBack(
+            callerState, groupKey,
+            (MlirBytecodeStringHandle){.id = resourceKey}, value);
+        if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret))) return ret;
         break;
       }
       case kMlirBytecodeResourceEntryString: {
         MlirBytecodeStringHandle value;
-        if (mlirBytecodeFailed(
-                mlirBytecodeParseHandle(callerState, &resPP, &value)))
+        ret = mlirBytecodeParseHandle(callerState, &resPP, &value);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
           return mlirBytecodeEmitError(callerState,
                                        "invalid/missing resource value");
-        if (mlirBytecodeFailed(mlirBytecodeResourceStringCallBack(
-                callerState, groupKey,
-                (MlirBytecodeStringHandle){.id = resourceKey}, value)))
-          return mlirBytecodeFailure();
+        ret = mlirBytecodeResourceStringCallBack(
+            callerState, groupKey,
+            (MlirBytecodeStringHandle){.id = resourceKey}, value);
+        if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret))) return ret;
         break;
       }
       }
@@ -1176,7 +1192,7 @@ mbci_getStackWIP(mbci_MlirIRSectionStack *stack) {
 // already and so not passed in.
 static MlirBytecodeStatus
 mbci_mlirIRSectionStackPush(void *callerState, mbci_MlirIRSectionStack *stack) {
-  if (stack->top == MLIRBC_IR_STACK_MAX_DEPTH) {
+  if (MLIRBC_UNLIKELY(stack->top == MLIRBC_IR_STACK_MAX_DEPTH)) {
     mlirBytecodeEmitError(callerState, "IR stack max depth exceeded");
     return mlirBytecodeIterationInterrupt();
   }
@@ -1194,30 +1210,15 @@ mbci_mlirIRSectionStackPop(void *callerState, mbci_MlirIRSectionStack *stack) {
   return mlirBytecodeSuccess();
 }
 
-#ifdef NDEBUG
-#define MLIRBC_AFTER(EXP, OBS, NUM)
-#else
-#define MLIRBC_AFTER(EXP, OBS, NUM)                                            \
-  do {                                                                         \
-    assert(mlirBytecodeSucceeded(                                              \
-        mlirBytecodeSkipHandles(callerState, &EXP, NUM)));                     \
-    if (EXP.pos != OBS->pos) {                                                 \
-      mlirBytecodeEmitDebug(callerState,                                       \
-                            "mismatch: %" PRIu64 " vs %" PRIu64 "\n", EXP.pos, \
-                            OBS->pos);                                         \
-    }                                                                          \
-    assert(EXP.pos == OBS->pos);                                               \
-  } while (false);
-#endif
-
 static MlirBytecodeStatus mbci_parseBlock(void *callerState,
                                           MlirBytecodeStream *stream,
                                           mbci_MlirIRSectionStack *stack) {
   mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(stack);
   bool hasArgs;
   uint64_t numOpsRemaining;
-  if (mlirBytecodeFailed(mlirBytecodeParseVarIntWithFlag(
-          callerState, stream, &numOpsRemaining, &hasArgs)))
+  MlirBytecodeStatus ret = mlirBytecodeParseVarIntWithFlag(
+      callerState, stream, &numOpsRemaining, &hasArgs);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(callerState,
                                  "unable to parse block's number of args");
   top->numOpsRemaining = numOpsRemaining;
@@ -1225,19 +1226,15 @@ static MlirBytecodeStatus mbci_parseBlock(void *callerState,
                         hasArgs ? "has args" : "has no args");
 
   uint64_t numArgs = 0;
-#ifndef NDEBUG
-  MlirBytecodeStream expectedEnd = *stream;
-#endif
   if (hasArgs) {
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseVarInt(callerState, stream, &numArgs)))
+    ret = mlirBytecodeParseVarInt(callerState, stream, &numArgs);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeEmitError(callerState,
                                    "invalid/missing number of block args");
   }
 
-  MlirBytecodeStatus ret = mlirBytecodeOperationStateBlockPush(
-      callerState, top->op, stream, numArgs);
-  MLIRBC_AFTER(expectedEnd, stream, 2 * numArgs + hasArgs);
+  ret = mlirBytecodeOperationStateBlockPush(callerState, top->op, stream,
+                                            numArgs);
   return ret;
 }
 
@@ -1247,8 +1244,9 @@ static MlirBytecodeStatus mbci_parseRegion(void *callerState,
                                            void *state) {
   mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(stack);
   uint64_t numBlocksRemaining;
-  if (mlirBytecodeFailed(
-          mlirBytecodeParseVarInt(callerState, stream, &numBlocksRemaining)))
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseVarInt(callerState, stream, &numBlocksRemaining);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(callerState, "invalid number of blocks");
   top->numBlocksRemaining = numBlocksRemaining;
   top->numOpsRemaining = mbci_MlirIRSectionStackUnset;
@@ -1256,8 +1254,8 @@ static MlirBytecodeStatus mbci_parseRegion(void *callerState,
     return mlirBytecodeSuccess();
 
   uint64_t numValues;
-  if (mlirBytecodeFailed(
-          mlirBytecodeParseVarInt(callerState, stream, &numValues)))
+  ret = mlirBytecodeParseVarInt(callerState, stream, &numValues);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(callerState,
                                  "invalid/missing number of values in region");
   mlirBytecodeEmitDebug("numBlocks = %d numValues = %d", numBlocksRemaining,
@@ -1280,34 +1278,37 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
   };
 
   MlirBytecodeOpHandle name;
-  if (mlirBytecodeFailed(
-          mlirBytecodeParseVarInt(callerState, stream, &name.id)))
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseVarInt(callerState, stream, &name.id);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(callerState, "invalid operation");
 
   uint8_t encodingMask;
-  if (mlirBytecodeFailed(
-          mlirBytecodeParseByte(callerState, stream, &encodingMask)))
+  ret = mlirBytecodeParseByte(callerState, stream, &encodingMask);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(callerState, "invalid encoding mask");
 
   MlirBytecodeLocHandle loc;
-  if (mlirBytecodeFailed(mlirBytecodeParseVarInt(callerState, stream, &loc.id)))
+  ret = mlirBytecodeParseVarInt(callerState, stream, &loc.id);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(callerState, "invalid operation location");
 
   mbci_MlirIRSectionStackEntry *cur = mbci_getStackWIP(stack);
-  MlirBytecodeStatus ret =
-      mlirBytecodeOperationStatePush(callerState, name, loc, &cur->op);
-  if (!mlirBytecodeSucceeded(ret))
+  ret = mlirBytecodeOperationStatePush(callerState, name, loc, &cur->op);
+  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
 
   if (encodingMask & kHasAttrs) {
     MlirBytecodeAttrHandle attrDict;
-    if (mlirBytecodeFailed(
-            mlirBytecodeParseHandle(callerState, stream, &attrDict))) {
+    ret = mlirBytecodeParseHandle(callerState, stream, &attrDict);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret
+
+                                           ))) {
       return mlirBytecodeEmitError(callerState, "invalid op attribute handle");
     }
     ret = mlirBytecodeOperationStateAddAttributeDictionary(callerState, cur->op,
                                                            attrDict);
-    if (!mlirBytecodeSucceeded(ret))
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return mlirBytecodeEmitDebug("unable to add attributes"), ret;
   }
 
@@ -1315,37 +1316,32 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
   if (encodingMask & kHasResults) {
     uint64_t numResults = 0;
     ret = mlirBytecodeParseVarInt(callerState, stream, &numResults);
-    if (!mlirBytecodeSucceeded(ret))
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
-    parserState->handleRange =
+    parserState->handleRange = (MlirBytecodeHandle*)
         malloc(numResults * sizeof(*parserState->handleRange));
     for (MlirBytecodeSize i = 0; i < numResults; ++i) {
       ret = mlirBytecodeParseHandle(callerState, stream,
                                     &parserState->handleRange[i]);
-      if (!mlirBytecodeSucceeded(ret))
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
     }
     ret = mlirBytecodeOperationStateAddResultTypes(
         callerState, cur->op,
         (MlirBytecodeHandlesRef){.handles = parserState->handleRange,
                                  .length = numResults});
-    if (!mlirBytecodeSucceeded(ret))
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
 
   if (encodingMask & kHasOperands) {
     uint64_t numOperands = 0;
-    if (mlirBytecodeSucceeded(
-            mlirBytecodeParseVarInt(callerState, stream, &numOperands))) {
-#ifndef NDEBUG
-      MlirBytecodeStream expectedEnd = *stream;
-#endif
+    ret = mlirBytecodeParseVarInt(callerState, stream, &numOperands);
+    if (MLIRBC_UNLIKELY(mlirBytecodeSucceeded(ret))) {
       ret = mlirBytecodeOperationStateAddOperands(callerState, cur->op, stream,
                                                   numOperands);
-      if (!mlirBytecodeSucceeded(ret))
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return mlirBytecodeEmitError(callerState, "invalid operands"), ret;
-
-      MLIRBC_AFTER(expectedEnd, stream, numOperands);
     } else {
       return mlirBytecodeEmitError(callerState, "invalid number of operands");
     }
@@ -1353,18 +1349,12 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
 
   if (encodingMask & kHasSuccessors) {
     uint64_t numSuccessors = 0;
-    if (mlirBytecodeSucceeded(
-            mlirBytecodeParseVarInt(callerState, stream, &numSuccessors))) {
-#ifndef NDEBUG
-      MlirBytecodeStream expectedEnd = *stream;
-#endif
-
+    ret = mlirBytecodeParseVarInt(callerState, stream, &numSuccessors);
+    if (MLIRBC_UNLIKELY(mlirBytecodeSucceeded(ret))) {
       ret = mlirBytecodeOperationStateAddSuccessors(callerState, cur->op,
                                                     stream, numSuccessors);
-      if (!mlirBytecodeSucceeded(ret))
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return mlirBytecodeEmitError(callerState, "invalid successors"), ret;
-
-      MLIRBC_AFTER(expectedEnd, stream, numSuccessors);
     } else {
       return mlirBytecodeEmitError(callerState, "invalid number of successors");
     }
@@ -1373,22 +1363,23 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
   if (encodingMask & kHasInlineRegions) {
     uint64_t numRegions = 0;
     bool isIsolatedFromAbove = false;
-    if (mlirBytecodeFailed(mlirBytecodeParseVarIntWithFlag(
-            callerState, stream, &numRegions, &isIsolatedFromAbove))) {
+    ret = mlirBytecodeParseVarIntWithFlag(callerState, stream, &numRegions,
+                                          &isIsolatedFromAbove);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
       return mlirBytecodeEmitError(callerState, "invalid number of regions");
     }
     cur->numRegionsRemaining = numRegions;
     cur->isIsolatedFromAbove = isIsolatedFromAbove;
     ret =
         mlirBytecodeOperationStateAddRegions(callerState, cur->op, numRegions);
-    if (!mlirBytecodeSucceeded(ret))
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
     return mbci_mlirIRSectionStackPush(callerState, stack);
   }
 
   // Completed parsing of op.
   ret = mlirBytecodeOperationStatePop(callerState, cur->op);
-  if (!mlirBytecodeSucceeded(ret))
+  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
   // `cur` is the scratchpad for parsing op without region while `top` is where
   // it is being parsed.
@@ -1404,13 +1395,14 @@ mlirBytecodeParseIRSection(void *callerState,
 
   bool hasArgs;
   uint64_t numOps;
-  if (mlirBytecodeFailed(mlirBytecodeParseVarIntWithFlag(callerState, &stream,
-                                                         &numOps, &hasArgs)))
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseVarIntWithFlag(callerState, &stream, &numOps, &hasArgs);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeFailure();
-  if (hasArgs)
+  if (MLIRBC_UNLIKELY(hasArgs))
     return mlirBytecodeEmitError(callerState,
                                  "IR section may not have block args");
-  if (numOps != 1)
+  if (MLIRBC_UNLIKELY(numOps != 1))
     return mlirBytecodeEmitError(callerState,
                                  "only one top-level op supported");
 
@@ -1426,7 +1418,7 @@ mlirBytecodeParseIRSection(void *callerState,
     if (top->numOpsRemaining == 0) {
       mlirBytecodeEmitDebug("no ops remaining in block");
       ret = mlirBytecodeOperationStateBlockPop(callerState, top->op);
-      if (!mlirBytecodeSucceeded(ret))
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
 
       --top->numBlocksRemaining;
@@ -1436,7 +1428,7 @@ mlirBytecodeParseIRSection(void *callerState,
     if (top->numBlocksRemaining == 0) {
       mlirBytecodeEmitDebug("no blocks remaining in region");
       ret = mlirBytecodeOperationStateRegionPop(callerState, top->op);
-      if (!mlirBytecodeSucceeded(ret))
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
 
       --top->numRegionsRemaining;
@@ -1446,7 +1438,7 @@ mlirBytecodeParseIRSection(void *callerState,
     if (top->numRegionsRemaining == 0) {
       mlirBytecodeEmitDebug("no regions remaining in op");
       ret = mlirBytecodeOperationStatePop(callerState, top->op);
-      if (!mlirBytecodeSucceeded(ret))
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
 
       mbci_mlirIRSectionStackPop(callerState, &stack);
@@ -1459,14 +1451,14 @@ mlirBytecodeParseIRSection(void *callerState,
     if (top->numBlocksRemaining == (uint16_t)mbci_MlirIRSectionStackUnset) {
       mlirBytecodeEmitDebug("starting region parsing");
       ret = mbci_parseRegion(callerState, &stream, &stack, callerState);
-      if (!mlirBytecodeSucceeded(ret))
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
       continue;
     }
     if (top->numOpsRemaining == (uint32_t)mbci_MlirIRSectionStackUnset) {
       mlirBytecodeEmitDebug("starting block parsing");
       ret = mbci_parseBlock(callerState, &stream, &stack);
-      if (!mlirBytecodeSucceeded(ret))
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
       continue;
     }
@@ -1476,7 +1468,7 @@ mlirBytecodeParseIRSection(void *callerState,
         (int)mbci_getStackTop(&stack)->numBlocksRemaining,
         (int)mbci_getStackTop(&stack)->numOpsRemaining);
     ret = mbci_parseOperation(callerState, parserState, &stream, &stack);
-    if (!mlirBytecodeSucceeded(ret))
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
   return mlirBytecodeSuccess();

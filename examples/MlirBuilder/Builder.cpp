@@ -53,7 +53,7 @@ InFlightDiagnostic MlirbcDialectBytecodeReader::emitError(const Twine &msg) {
 
 LogicalResult MlirbcDialectBytecodeReader::readAttribute(Attribute &result) {
   MlirBytecodeAttrHandle handle;
-  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(&stream, &handle)))
+  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(this, &stream, &handle)))
     return failure();
   if (!mlirBytecodeSucceeded(mlirBytecodeProcessAttribute(this, handle)))
     return failure();
@@ -63,7 +63,7 @@ LogicalResult MlirbcDialectBytecodeReader::readAttribute(Attribute &result) {
 
 LogicalResult MlirbcDialectBytecodeReader::readType(Type &result) {
   MlirBytecodeAttrHandle handle;
-  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(&stream, &handle)))
+  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(this, &stream, &handle)))
     return failure();
   if (!mlirBytecodeSucceeded(mlirBytecodeProcessType(this, handle)))
     return failure();
@@ -73,12 +73,12 @@ LogicalResult MlirbcDialectBytecodeReader::readType(Type &result) {
 
 LogicalResult MlirbcDialectBytecodeReader::readVarInt(uint64_t &result) {
   return failure(
-      !mlirBytecodeSucceeded(mlirBytecodeParseVarInt(&stream, &result)));
+      !mlirBytecodeSucceeded(mlirBytecodeParseVarInt(this, &stream, &result)));
 }
 
 LogicalResult MlirbcDialectBytecodeReader::readSignedVarInt(int64_t &result) {
   return failure(
-      !mlirBytecodeSucceeded(mlirBytecodeParseSignedVarInt(&stream, &result)));
+      !mlirBytecodeSucceeded(mlirBytecodeParseSignedVarInt(this, &stream, &result)));
 }
 
 FailureOr<APInt>
@@ -86,7 +86,7 @@ MlirbcDialectBytecodeReader::readAPIntWithKnownWidth(unsigned bitWidth) {
 
   MlirBytecodeAPInt result;
   MlirBytecodeStatus ret =
-      mlirBytecodeParseAPIntWithKnownWidth(&stream, bitWidth, &result);
+      mlirBytecodeParseAPIntWithKnownWidth(this, &stream, bitWidth, &result);
   if (!mlirBytecodeSucceeded(ret))
     return failure();
   if (result.bitWidth <= 64)
@@ -110,7 +110,7 @@ FailureOr<APFloat> MlirbcDialectBytecodeReader::readAPFloatWithKnownSemantics(
 
 LogicalResult MlirbcDialectBytecodeReader::readString(StringRef &result) {
   MlirBytecodeStringHandle handle;
-  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(&stream, &handle)))
+  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(this, &stream, &handle)))
     return failure();
   if (handle.id >= strings.size())
     return failure();
@@ -124,7 +124,7 @@ LogicalResult MlirbcDialectBytecodeReader::readBlob(ArrayRef<char> &result) {
   if (failed(readVarInt(dataSize)))
     return failure();
   const uint8_t *ptr;
-  MlirBytecodeStatus ret = mlirBytecodeParseBytes(&stream, dataSize, &ptr);
+  MlirBytecodeStatus ret = mlirBytecodeParseBytes(this, &stream, dataSize, &ptr);
   if (!mlirBytecodeSucceeded(ret))
     return failure();
 
@@ -135,7 +135,7 @@ LogicalResult MlirbcDialectBytecodeReader::readBlob(ArrayRef<char> &result) {
 FailureOr<AsmDialectResourceHandle>
 MlirbcDialectBytecodeReader::readResourceHandle() {
   MlirBytecodeResourceHandle handle;
-  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(&stream, &handle)))
+  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(this, &stream, &handle)))
     return failure();
   if (handle.id >= resources.size())
     return failure();
@@ -156,15 +156,14 @@ mlirBytecodeOperationStatePop(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeOperationStateAddAttributes(void *callerState,
+mlirBytecodeOperationStateAddAttributeDictionary(void *callerState,
                                         MlirBytecodeOperationStateHandle,
                                         MlirBytecodeAttrHandle) {
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
-    void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeStream *,
-    uint64_t numResults) {
+    void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeHandlesRef types) {
   return mlirBytecodeUnhandled();
 }
 
@@ -313,7 +312,7 @@ int main(int argc, char **argv) {
   llvm::SourceMgr sourceMgr;
   auto fileOrErr = llvm::MemoryBuffer::getFileOrSTDIN(argv[1]);
   if (std::error_code error = fileOrErr.getError()) {
-    mlirBytecodeEmitError("MlirBytecodeFailed to open file '%s'", argv[1]);
+    fprintf(stderr, "MlirBytecodeFailed to open file '%s'", argv[1]);
     return 1;
   }
   auto idx = sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
@@ -321,14 +320,13 @@ int main(int argc, char **argv) {
 
   MlirBytecodeBytesRef ref = {.data = (const uint8_t *)buffer->getBufferStart(),
                               .length = buffer->getBufferSize()};
-  MlirBytecodeFile mlirFile = mlirBytecodePopulateFile(ref);
-
-  if (!mlirBytecodeFileEmpty(&mlirFile)) {
-    MLIRContext context;
-    auto loc = UnknownLoc::get(&context);
-    MlirbcDialectBytecodeReader reader(loc);
-    if (mlirBytecodeFailed(mlirBytecodeParseFile(&reader, ref)))
-      return mlirBytecodeEmitError("MlirBytecodeFailed to parse file"), 1;
+  MLIRContext context;
+  auto loc = UnknownLoc::get(&context);
+  MlirbcDialectBytecodeReader reader(loc);
+  MlirBytecodeParserState parserState = mlirBytecodePopulateParserState(&reader, ref);
+  if (!mlirBytecodeParserStateEmpty(&parserState)) {
+    if (mlirBytecodeFailed(mlirBytecodeParse(&reader, ref)))
+      return mlirBytecodeEmitError(&reader, "MlirBytecodeFailed to parse file"), 1;
   }
 
   return 0;
