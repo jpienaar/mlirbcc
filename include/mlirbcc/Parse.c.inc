@@ -19,9 +19,6 @@
 // pointer as first argument that gets directly propagated during parsing and
 // can be used by instantiation for additional/parse local state capture.
 //
-// Note: only set implementation define before you include this file in one C or
-// C++ file.
-
 // Convention followed in this file is to prefix implementation details with
 // mbci_. But there is more to do to differentiate between internal and
 // user-facing methods.
@@ -51,6 +48,23 @@ extern "C" {
 typedef struct MlirBytecodeStatus MlirBytecodeStatus;
 
 //===----------------------------------------------------------------------===//
+// MLIR file parsing methods.
+
+/// Populates the MlirBytecodeParserState contents for given in memory bytes.
+/// Returns an empty file if population failed.
+static MlirBytecodeParserState
+mlirBytecodePopulateParserState(void *callerState, MlirBytecodeBytesRef bytes);
+
+/// Parses the given MLIR file represented in memory `bytes`, calls the
+/// appropriate callbacks during parsing. This combines the parsing methods
+/// below.
+static MlirBytecodeStatus mlirBytecodeParse(void *callerState,
+                                            MlirBytecodeBytesRef bytes);
+
+/// Returns whether the given MlirBytecodeParserState structure is empty.
+static bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *file);
+
+//===----------------------------------------------------------------------===//
 // Functions required to be defined:
 #define MLIRBC_DEF static
 
@@ -70,10 +84,8 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
     MlirBytecodeAttrHandle);
 
 /// Called for operation with results.
-// Note: This _requires_ that the stream is progressed post the last item before
-// this function returns.
-// TODO: Consider making these iterators/for each functors instead of exposing
-// bytestream to avoid mishaps with progressing stream.
+// Note: This function returns reference to unpacked array which may be
+// overwritten by following parse calls, hence either copy or process.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
     void *callerState, MlirBytecodeOperationStateHandle,
     MlirBytecodeHandlesRef);
@@ -233,30 +245,7 @@ mlirBytecodeParseResourceSection(void *callerState,
                                  MlirBytecodeParserState *parserState);
 
 //===----------------------------------------------------------------------===//
-// MLIR file parsing methods.
-
-/// Populates the MlirBytecodeParserState contents for given in memory bytes.
-/// Returns an empty file if population failed.
-static MlirBytecodeParserState
-mlirBytecodePopulateParserState(void *callerState, MlirBytecodeBytesRef bytes);
-
-/// Parses the given MLIR file represented in memory `bytes`, calls the
-/// appropriate callbacks during parsing. This combines the parsing methods
-/// below.
-static MlirBytecodeStatus mlirBytecodeParse(void *callerState,
-                                            MlirBytecodeBytesRef bytes);
-
-/// Returns whether the given MlirBytecodeParserState structure is empty.
-static bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *file);
-
-//===----------------------------------------------------------------------===//
 // Dialect parsing utility methods.
-
-/// Creates a bytecode stream from section of bytes.
-static MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef ref);
-
-/// Reset the stream to its head.
-static void mlirBytecodeStreamReset(MlirBytecodeStream *stream);
 
 /// Parse the next handle on the stream and increment stream.
 static MlirBytecodeStatus mlirBytecodeParseHandle(void *callerState,
@@ -287,11 +276,6 @@ static MlirBytecodeStatus mlirBytecodeParseVarInt(void *callerState,
 static MlirBytecodeStatus
 mlirBytecodeParseSignedVarInt(void *callerState, MlirBytecodeStream *stream,
                               int64_t *result);
-
-/// Parse APInt of known width.
-static MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
-    void *callerState, MlirBytecodeStream *stream, unsigned bitWidth,
-    MlirBytecodeAPInt *result);
 
 /// Parse a variable length encoded integer whose low bit is used to encode a
 /// flag, i.e: `(integerValue << 1) | (flag ? 1 : 0)`.
@@ -392,9 +376,8 @@ extern void mlirBytecodeEmitDebugImpl(const char *file, int line,
 #define MLIRBC_UNLIKELY(EXPR) (EXPR)
 #endif
 
-// ----
+//===----------------------------------------------------------------------===//
 // Bytecode constants.
-// ----
 
 enum {
   // This section contains strings referenced within the bytecode.
@@ -426,16 +409,6 @@ enum {
   mbci_kNumSections = 7,
 };
 
-struct MlirBytecodeParserState {
-  uint64_t version;
-  MlirBytecodeBytesRef producer;
-
-  MlirBytecodeBytesRef sectionData[mbci_kNumSections];
-
-  MlirBytecodeHandle *handleRange;
-  size_t maxSizeOfRange;
-};
-
 static const char *mbci_sectionIDToString(uint8_t id) {
   const char *arr[] = {
       "String (0)",         //
@@ -463,6 +436,38 @@ static bool mbci_isSectionOptional(int id) {
   default:
     return false;
   }
+}
+
+//===----------------------------------------------------------------------===//
+// Parser state definition and helpers.
+
+struct MlirBytecodeParserState {
+  uint64_t version;
+  MlirBytecodeBytesRef producer;
+
+  MlirBytecodeBytesRef sectionData[mbci_kNumSections];
+
+  // Scratch pad for unpacking handles.
+  MlirBytecodeHandle *scratchBase;
+  size_t size, capacity;
+};
+
+MlirBytecodeStatus mbci_pushOnScratch(MlirBytecodeParserState* state, size_t n, MlirBytecodeHandle** res) {
+  if (MLIRBC_UNLIKELY(state->size + n > state->capacity)) {
+    // Something smarter could be done here, but expected common case is
+    // reasonable initial capacity set by user and most scratch space usage is
+    // smaller.
+    state->capacity += n;
+    state->scratchBase = (MlirBytecodeHandle*)realloc(state->scratchBase, state->capacity * sizeof(MlirBytecodeHandle));
+  }
+
+  *res = state->scratchBase + state->size;
+  state->size += n;
+  return mlirBytecodeSuccess();
+}
+
+void mbci_clearScratch(MlirBytecodeParserState* state, size_t n) {
+  state->size = 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -561,14 +566,10 @@ MlirBytecodeStatus mlirBytecodeParseHandle(void *callerState,
   return mlirBytecodeParseVarInt(callerState, stream, &result->id);
 }
 
-MlirBytecodeStatus mlirBytecodeSkipHandles(void *callerState,
+__attribute__((used)) MlirBytecodeStatus mlirBytecodeSkipHandles(void *callerState,
                                            MlirBytecodeStream *stream,
                                            uint64_t n) {
   return mbci_skipVarInts(callerState, stream, n);
-}
-
-void mlirBytecodeStreamReset(MlirBytecodeStream *stream) {
-  stream->pos = stream->start;
 }
 
 MlirBytecodeStatus mlirBytecodeParseVarInt(void *callerState,
@@ -622,49 +623,6 @@ MlirBytecodeStatus mlirBytecodeParseSignedVarInt(void *callerState,
   if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeFailure();
   *result = (*result >> 1) ^ (~(*result & 1) + 1);
-  return mlirBytecodeSuccess();
-}
-
-MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
-    void *callerState, MlirBytecodeStream *stream, unsigned bitWidth,
-    MlirBytecodeAPInt *result) {
-  result->bitWidth = bitWidth;
-  MlirBytecodeStatus ret;
-  // Small values are encoded using a single byte.
-  if (bitWidth <= 8) {
-    uint8_t value;
-    ret = mlirBytecodeParseByte(callerState, stream, &value);
-    if (!mlirBytecodeSucceeded(ret))
-      return ret;
-    return ret;
-
-    result->U.value = value;
-    return mlirBytecodeSuccess();
-  }
-
-  // Large values up to 64 bits are encoded using a single varint.
-  if (bitWidth <= 64) {
-    ret = mlirBytecodeParseSignedVarInt(callerState, stream, &result->U.value);
-    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-      return ret;
-    return mlirBytecodeSuccess();
-  }
-
-  // Otherwise, for really big values we encode the array of active words in
-  // the value.
-  uint64_t numActiveWords;
-  ret = mlirBytecodeParseVarInt(callerState, stream, &numActiveWords);
-  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-    return ret;
-
-  // FIXME: This is
-  result->U.data = (uint64_t *)malloc(numActiveWords * sizeof(uint64_t));
-  for (uint64_t i = 0; i < numActiveWords; ++i) {
-    ret = mlirBytecodeParseSignedVarInt(callerState, stream,
-                                        (int64_t *)&result->U.data[i]);
-    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-      return ret;
-  }
   return mlirBytecodeSuccess();
 }
 
@@ -759,13 +717,6 @@ mbci_populateStreamForSection(MlirBytecodeBytesRef ref) {
   stream.start = stream.pos = ref.data;
   stream.end = stream.start + ref.length;
   return stream;
-}
-
-MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes) {
-  MlirBytecodeStream ret;
-  ret.start = ret.pos = bytes.data;
-  ret.end = ret.start + bytes.length;
-  return ret;
 }
 
 static MlirBytecodeBytesRef
@@ -1320,17 +1271,16 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
     ret = mlirBytecodeParseVarInt(callerState, stream, &numResults);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
-    parserState->handleRange = (MlirBytecodeHandle *)malloc(
-        numResults * sizeof(*parserState->handleRange));
+    MlirBytecodeHandle* range;
+    mbci_pushOnScratch(parserState, numResults, &range);
     for (MlirBytecodeSize i = 0; i < numResults; ++i) {
-      ret = mlirBytecodeParseHandle(callerState, stream,
-                                    &parserState->handleRange[i]);
+      ret = mlirBytecodeParseHandle(callerState, stream, &range[i]);
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
     }
     ret = mlirBytecodeOperationStateAddResultTypes(
         callerState, cur->op,
-        (MlirBytecodeHandlesRef){.handles = parserState->handleRange,
+        (MlirBytecodeHandlesRef){.handles = range,
                                  .length = numResults});
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
@@ -1522,6 +1472,11 @@ mlirBytecodePopulateParserState(void *callerState,
              ret;
     }
   }
+
+  // TODO: Allow passing in.
+  ret.scratchBase = 0;
+  ret.capacity = ret.size = 0;
+
   // Mark as valid.
   ret.producer = producer;
   return ret;

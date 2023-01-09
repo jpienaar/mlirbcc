@@ -80,18 +80,6 @@ struct MlirBytecodeStream {
 };
 typedef struct MlirBytecodeStream MlirBytecodeStream;
 
-// TODO: Should this even be here? Perhaps APInt is not part of this level.
-struct MlirBytecodeAPInt {
-  // If bitWidth <= 64 then value is populated, else
-  union {
-    int64_t value;
-    uint64_t *data;
-  } U;
-
-  unsigned bitWidth;
-};
-typedef struct MlirBytecodeAPInt MlirBytecodeAPInt;
-
 #ifdef __cplusplus
 }
 #endif
