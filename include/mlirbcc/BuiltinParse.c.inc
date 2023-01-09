@@ -30,6 +30,9 @@ mlirBytecodeParseBuiltinType(void *callerState,
 // NOTE: this is proof-of-concept and just enough working to show end-to-end.
 // The parsing of attributes/types (especially those with arrays) will change.
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+
 //===----------------------------------------------------------------------===//
 // Create attributes.
 
@@ -525,6 +528,13 @@ static MlirBytecodeStatus parseTypeAttr(void *callerState,
   return mlirBytecodeEmitError(callerState, "invalid TypeAttr");
 }
 
+MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes) {
+  MlirBytecodeStream ret;
+  ret.start = ret.pos = bytes.data;
+  ret.end = ret.start + bytes.length;
+  return ret;
+}
+
 MlirBytecodeStatus
 mlirBytecodeParseBuiltinAttr(void *callerState,
                              MlirBytecodeAttrHandle attrHandle,
@@ -640,3 +650,4 @@ mlirBytecodeParseBuiltinType(void *callerState,
 
   return mlirBytecodeSuccess();
 }
+#pragma GCC diagnostic pop
