@@ -160,7 +160,7 @@ mlirBytecodeDialectCallBack(void *, MlirBytecodeDialectHandle, size_t /*total*/,
 
 /// Invoked with opname with its dialect and string handle corresponding to its
 /// name.
-static MlirBytecodeStatus
+MLIRBC_DEF MlirBytecodeStatus
 mlirBytecodeDialectOpCallBack(void *, MlirBytecodeDialectHandle,
                               MlirBytecodeOpHandle, MlirBytecodeStringHandle);
 
@@ -453,16 +453,16 @@ struct MlirBytecodeParserState {
 };
 
 MlirBytecodeStatus mbci_pushOnScratch(MlirBytecodeParserState* state, size_t n, MlirBytecodeHandle** res) {
-  if (MLIRBC_UNLIKELY(state->size + n > state->capacity)) {
+  if (MLIRBC_UNLIKELY(n > state->capacity)) {
     // Something smarter could be done here, but expected common case is
     // reasonable initial capacity set by user and most scratch space usage is
     // smaller.
     state->capacity += n;
-    state->scratchBase = (MlirBytecodeHandle*)realloc(state->scratchBase, state->capacity * sizeof(MlirBytecodeHandle));
+    state->scratchBase = (MlirBytecodeHandle*)malloc(state->capacity * sizeof(MlirBytecodeHandle));
   }
 
-  *res = state->scratchBase + state->size;
-  state->size += n;
+  *res = state->scratchBase;
+  state->size = n;
   return mlirBytecodeSuccess();
 }
 

@@ -24,8 +24,8 @@
 #include <unistd.h>
 
 // Include bytecode parsing implementation.
-#include "mlirbcc/BytecodeTypes.h"
 #include "mlirbcc/Parse.c.inc"
+#include "mlirbcc/DialectBytecodeReader.c.inc"
 // Dialects.
 #include "mlirbcc/BuiltinParse.c.inc"
 
