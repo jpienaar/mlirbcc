@@ -10,10 +10,11 @@
 #include "mlir-c/Support.h"
 #include "mlir/Bytecode/BytecodeImplementation.h"
 #include "llvm/Support/SourceMgr.h"
+#include "mlir/IR/Diagnostics.h"
 
 // Include bytecode parsing implementation.
-#include "mlir/IR/Diagnostics.h"
 #include "mlirbcc/Parse.c.inc"
+#include "mlirbcc/DialectBytecodeReader.c.inc"
 
 using namespace mlir;
 
@@ -81,67 +82,13 @@ LogicalResult MlirbcDialectBytecodeReader::readSignedVarInt(int64_t &result) {
       mlirBytecodeParseSignedVarInt(this, &stream, &result)));
 }
 
-// TODO: Should this even be here? Perhaps APInt is not part of this level.
-struct MlirBytecodeAPInt {
-  // If bitWidth <= 64 then value is populated, else
-  union {
-    int64_t value;
-    uint64_t *data;
-  } U;
-
-  unsigned bitWidth;
-};
-typedef struct MlirBytecodeAPInt MlirBytecodeAPInt;
-
-MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
-    void *callerState, MlirBytecodeStream *stream, unsigned bitWidth,
-    MlirBytecodeAPInt *result) {
-  result->bitWidth = bitWidth;
-  MlirBytecodeStatus ret;
-  // Small values are encoded using a single byte.
-  if (bitWidth <= 8) {
-    uint8_t value;
-    ret = mlirBytecodeParseByte(callerState, stream, &value);
-    if (!mlirBytecodeSucceeded(ret))
-      return ret;
-    return ret;
-
-    result->U.value = value;
-    return mlirBytecodeSuccess();
-  }
-
-  // Large values up to 64 bits are encoded using a single varint.
-  if (bitWidth <= 64) {
-    ret = mlirBytecodeParseSignedVarInt(callerState, stream, &result->U.value);
-    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-      return ret;
-    return mlirBytecodeSuccess();
-  }
-
-  // Otherwise, for really big values we encode the array of active words in
-  // the value.
-  uint64_t numActiveWords;
-  ret = mlirBytecodeParseVarInt(callerState, stream, &numActiveWords);
-  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-    return ret;
-
-  // FIXME: This is
-  result->U.data = (uint64_t *)malloc(numActiveWords * sizeof(uint64_t));
-  for (uint64_t i = 0; i < numActiveWords; ++i) {
-    ret = mlirBytecodeParseSignedVarInt(callerState, stream,
-                                        (int64_t *)&result->U.data[i]);
-    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-      return ret;
-  }
-  return mlirBytecodeSuccess();
-}
-
 FailureOr<APInt>
 MlirbcDialectBytecodeReader::readAPIntWithKnownWidth(unsigned bitWidth) {
 
   MlirBytecodeAPInt result;
+  MlirBytecodeDialectReader reader = {.callerState = this, .stream = &stream};
   MlirBytecodeStatus ret =
-      mlirBytecodeParseAPIntWithKnownWidth(this, &stream, bitWidth, &result);
+      mlirBytecodeParseAPIntWithKnownWidth(&reader, bitWidth, malloc, &result);
   if (!mlirBytecodeSucceeded(ret))
     return failure();
   if (result.bitWidth <= 64)
