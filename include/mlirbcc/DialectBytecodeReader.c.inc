@@ -56,10 +56,12 @@ MlirBytecodeDialectReaderReadBlob(MlirBytecodeDialectReader *reader,
 // MlirBytecodeDialectReaderReadAPFloatWithKnownSemantics(MlirBytecodeDialectReader*
 // reader, const llvm::fltSemantics &semantics) override;
 
+// Structure that is just sufficient to capture the bits required to materialize
+// a APInt.
 struct MlirBytecodeAPInt {
   // If bitWidth <= 64 then value is populated, else
   union {
-    int64_t value;
+    uint64_t value;
     uint64_t *data;
   } U;
 
@@ -70,9 +72,9 @@ struct MlirBytecodeAPInt {
 }
 #endif
 
-struct MlirBytecodeDialectReader  {
-  void* callerState;
-  MlirBytecodeStream* stream;
+struct MlirBytecodeDialectReader {
+  void *callerState;
+  MlirBytecodeStream *stream;
 };
 
 MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
@@ -95,7 +97,8 @@ MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
 
   // Large values up to 64 bits are encoded using a single varint.
   if (bitWidth <= 64) {
-    ret = mlirBytecodeParseSignedVarInt(reader->callerState, reader->stream, &result->U.value);
+    ret = mlirBytecodeParseSignedVarInt(reader->callerState, reader->stream,
+                                        (int64_t *)&result->U.value);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
     return mlirBytecodeSuccess();
@@ -105,10 +108,12 @@ MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
   // the value.
 
   // Check if allocation function was provided.
-  if (!allocFn) return mlirBytecodeUnhandled();
+  if (!allocFn)
+    return mlirBytecodeUnhandled();
 
   uint64_t numActiveWords;
-  ret = mlirBytecodeParseVarInt(reader->callerState, reader->stream, &numActiveWords);
+  ret = mlirBytecodeParseVarInt(reader->callerState, reader->stream,
+                                &numActiveWords);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
 
