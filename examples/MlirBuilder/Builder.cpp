@@ -6,8 +6,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir-c/IR.h"
-#include "mlir-c/Support.h"
 #include "mlir/Bytecode/BytecodeImplementation.h"
 #include "mlir/IR/Diagnostics.h"
 #include "llvm/Support/SourceMgr.h"
@@ -20,11 +18,48 @@
 
 using namespace mlir;
 
+// TODO: Support for big-endian architectures.
+// TODO: Properly preserve use lists of values.
+
+#include "mlir/AsmParser/AsmParser.h"
+#include "mlir/Bytecode/BytecodeImplementation.h"
+#include "mlir/Bytecode/BytecodeReader.h"
+#include "mlir/IR/BuiltinDialect.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/OpImplementation.h"
+#include "mlir/IR/Verifier.h"
+#include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/MemoryBufferRef.h"
+#include "llvm/Support/SaveAndRestore.h"
+#include "llvm/Support/SourceMgr.h"
+#include <optional>
+
+#define DEBUG_TYPE "mlir-bytecode-reader"
+
+struct ParsingState {
+  ParsingState(Location loc) : loc(loc) {}
+
+  Attribute attribute(int i) const { return attributes[i]; }
+  Type type(int i) const { return types[i]; }
+  StringRef string(int i) const { return strings[i]; }
+
+  // These are all public to enable access via plain C functions.
+  std::vector<Attribute> attributes;
+  std::vector<Type> types;
+  std::vector<AsmDialectResourceHandle> resources;
+  std::vector<StringRef> strings;
+
+  Location loc;
+};
+
 struct MlirbcDialectBytecodeReader : public mlir::DialectBytecodeReader {
-  MlirbcDialectBytecodeReader(MlirBytecodeStream &stream, Location loc)
+  MlirbcDialectBytecodeReader(ParsingState &state, MlirBytecodeStream &stream)
       : reader((MlirBytecodeDialectReader){.callerState = this,
                                            .stream = &stream}),
-        loc(loc){};
+        state(state){};
 
   InFlightDiagnostic emitError(const Twine &msg = {}) override;
   LogicalResult readAttribute(Attribute &result) override;
@@ -38,22 +73,12 @@ struct MlirbcDialectBytecodeReader : public mlir::DialectBytecodeReader {
   LogicalResult readBlob(ArrayRef<char> &result) override;
   FailureOr<AsmDialectResourceHandle> readResourceHandle() override;
 
-  Attribute attribute(int i) const { return attributes[i]; }
-  Type type(int i) const { return types[i]; }
-
   MlirBytecodeDialectReader reader;
-
-  // These are all public to enable access via plain C functions.
-  std::vector<Attribute> attributes;
-  std::vector<Type> types;
-  std::vector<AsmDialectResourceHandle> resources;
-  std::vector<StringRef> strings;
-
-  Location loc;
+  ParsingState &state;
 };
 
 InFlightDiagnostic MlirbcDialectBytecodeReader::emitError(const Twine &msg) {
-  return mlir::emitError(loc, msg);
+  return mlir::emitError(state.loc, msg);
 }
 
 LogicalResult MlirbcDialectBytecodeReader::readAttribute(Attribute &result) {
@@ -61,7 +86,7 @@ LogicalResult MlirbcDialectBytecodeReader::readAttribute(Attribute &result) {
   if (!mlirBytecodeSucceeded(
           mlirBytecodeDialectReaderReadAttribute(&reader, &handle)))
     return failure();
-  result = attribute(handle.id);
+  result = state.attribute(handle.id);
   return success();
 }
 
@@ -70,7 +95,7 @@ LogicalResult MlirbcDialectBytecodeReader::readType(Type &result) {
   if (!mlirBytecodeSucceeded(
           mlirBytecodeDialectReaderReadType(&reader, &handle)))
     return failure();
-  result = type(handle.id);
+  result = state.type(handle.id);
   return success();
 }
 
@@ -134,27 +159,30 @@ MlirbcDialectBytecodeReader::readResourceHandle() {
   if (!mlirBytecodeSucceeded(
           mlirBytecodeDialectReaderReadResourceHandle(&reader, &handle)))
     return failure();
-  if (handle.id >= resources.size())
+  if (handle.id >= state.resources.size())
     return failure();
-  return resources[handle.id];
+  return state.resources[handle.id];
 }
 
 MlirBytecodeStatus
 mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOpHandle name,
                                MlirBytecodeLocHandle loc,
                                MlirBytecodeOperationStateHandle *opState) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus
 mlirBytecodeOperationStatePop(void *callerState,
                               MlirBytecodeOperationStateHandle) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
     void *callerState, MlirBytecodeOperationStateHandle,
     MlirBytecodeAttrHandle) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
@@ -162,6 +190,7 @@ MlirBytecodeStatus
 mlirBytecodeOperationStateAddResultTypes(void *callerState,
                                          MlirBytecodeOperationStateHandle,
                                          MlirBytecodeHandlesRef types) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
@@ -171,11 +200,13 @@ MlirBytecodeStatus
 mlirBytecodeOperationStateAddOperands(void *callerState,
                                       MlirBytecodeOperationStateHandle,
                                       MlirBytecodeHandlesRef) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
     void *callerState, MlirBytecodeOperationStateHandle, uint64_t numRegions) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
@@ -183,12 +214,14 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
 // this function returns.
 MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
     void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeSizesRef) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus mlirBytecodeRegionPush(void *callerState,
                                           MlirBytecodeOperationStateHandle,
                                           size_t numBlocks, size_t numValues) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
@@ -198,121 +231,144 @@ MlirBytecodeStatus
 mlirBytecodeOperationStateBlockPush(void *callerState,
                                     MlirBytecodeOperationStateHandle,
                                     MlirBytecodeHandlesRef) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus
 mlirBytecodeOperationStateBlockPop(void *callerState,
                                    MlirBytecodeOperationStateHandle) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus
 mlirBytecodeOperationStateRegionPop(void *callerState,
                                     MlirBytecodeOperationStateHandle) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus mlirBytecodeProcessAttribute(void *callerState,
                                                 MlirBytecodeAttrHandle handle) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus mlirBytecodeProcessType(void *callerState,
                                            MlirBytecodeTypeHandle handle) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeAttrCallBack(void *, MlirBytecodeAttrHandle,
+MlirBytecodeStatus mlirBytecodeAttrCallBack(void *callerState,
+                                            MlirBytecodeAttrHandle,
                                             MlirBytecodeDialectHandle,
                                             MlirBytecodeBytesRef,
                                             bool hasCustom) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeTypeCallBack(void *, MlirBytecodeTypeHandle,
+MlirBytecodeStatus mlirBytecodeTypeCallBack(void *callerState,
+                                            MlirBytecodeTypeHandle,
                                             MlirBytecodeDialectHandle,
                                             MlirBytecodeBytesRef,
                                             bool hasCustom) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeDialectCallBack(void *,
+MlirBytecodeStatus mlirBytecodeDialectCallBack(void *callerState,
                                                MlirBytecodeDialectHandle,
                                                MlirBytecodeStringHandle) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeDialectOpCallBack(void *,
+MlirBytecodeStatus mlirBytecodeDialectOpCallBack(void *callerState,
                                                  MlirBytecodeDialectHandle,
                                                  MlirBytecodeOpHandle,
                                                  MlirBytecodeStringHandle) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus
-mlirBytecodeResourceSectionEnter(void *,
+mlirBytecodeResourceSectionEnter(void *callerState,
                                  MlirBytecodeSize numExternalResourceGroups) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus
-mlirBytecodeResourceGroupEnter(void *, MlirBytecodeStringHandle groupKey,
+mlirBytecodeResourceGroupEnter(void *callerState,
+                               MlirBytecodeStringHandle groupKey,
                                MlirBytecodeSize numResources) {
+  ParsingState *state = (ParsingState *)callerState;
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
+    void *callerState, MlirBytecodeStringHandle resourceKey,
+    MlirBytecodeStringHandle groupKey, MlirBytecodeBytesRef blob) {
+  ParsingState *state = (ParsingState *)callerState;
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
+    void *callerState, MlirBytecodeStringHandle resourceKey,
+    MlirBytecodeStringHandle groupKey, const uint8_t) {
+  ParsingState *state = (ParsingState *)callerState;
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus mlirBytecodeResourceStringCallBack(
+    void *callerState, MlirBytecodeStringHandle resourceKey,
+    MlirBytecodeStringHandle groupKey, MlirBytecodeStringHandle) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus
-mlirBytecodeResourceBlobCallBack(void *, MlirBytecodeStringHandle resourceKey,
-                                 MlirBytecodeStringHandle groupKey,
-                                 MlirBytecodeBytesRef blob) {
-  return mlirBytecodeUnhandled();
-}
-
-MlirBytecodeStatus
-mlirBytecodeResourceBoolCallBack(void *, MlirBytecodeStringHandle resourceKey,
-                                 MlirBytecodeStringHandle groupKey,
-                                 const uint8_t) {
-  return mlirBytecodeUnhandled();
-}
-
-MlirBytecodeStatus
-mlirBytecodeResourceStringCallBack(void *, MlirBytecodeStringHandle resourceKey,
-                                   MlirBytecodeStringHandle groupKey,
-                                   MlirBytecodeStringHandle) {
-  return mlirBytecodeUnhandled();
-}
-
-MlirBytecodeBytesRef
 mlirBytecodeGetStringSectionValue(void *callerState,
-                                  MlirBytecodeStringHandle idx) {
-  auto *state = (MlirbcDialectBytecodeReader *)callerState;
-  auto str = state->strings[idx.id];
-  return MlirBytecodeBytesRef{.data = (const uint8_t *)str.data(),
-                              .length = str.size()};
+                                  MlirBytecodeStringHandle idx,
+                                  MlirBytecodeBytesRef *result) {
+  ParsingState *state = (ParsingState *)callerState;
+  auto str = state->string(idx.id);
+  result->data = (const uint8_t *)str.data();
+  result->length = str.size();
+  return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeAttributesPush(void *,
+MlirBytecodeStatus mlirBytecodeAttributesPush(void *callerState,
                                               MlirBytecodeSize numArgs) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeDialectsPush(void *,
+MlirBytecodeStatus mlirBytecodeDialectsPush(void *callerState,
                                             MlirBytecodeSize numDialects) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeStringsPush(void *,
+MlirBytecodeStatus mlirBytecodeStringsPush(void *callerState,
                                            MlirBytecodeSize numStrings) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeTypesPush(void *, MlirBytecodeSize numTypes) {
+MlirBytecodeStatus mlirBytecodeTypesPush(void *callerState,
+                                         MlirBytecodeSize numTypes) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeStringCallBack(void *, MlirBytecodeStringHandle,
+MlirBytecodeStatus mlirBytecodeStringCallBack(void *callerState,
+                                              MlirBytecodeStringHandle,
                                               MlirBytecodeBytesRef) {
+  ParsingState *state = (ParsingState *)callerState;
   return mlirBytecodeUnhandled();
 }
 
@@ -340,10 +396,10 @@ int main(int argc, char **argv) {
 
   MlirBytecodeParserState parserState =
       mlirBytecodePopulateParserState(&stream, ref, nullptr, 0);
-  MlirbcDialectBytecodeReader reader(stream, loc);
+  ParsingState state(loc);
   if (!mlirBytecodeParserStateEmpty(&parserState)) {
-    if (mlirBytecodeFailed(mlirBytecodeParse(&reader, &parserState)))
-      return mlirBytecodeEmitError(&reader, "MlirBytecodeFailed to parse file"),
+    if (mlirBytecodeFailed(mlirBytecodeParse(&state, &parserState)))
+      return mlirBytecodeEmitError(&state, "MlirBytecodeFailed to parse file"),
              1;
   }
 

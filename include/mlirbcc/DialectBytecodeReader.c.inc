@@ -179,8 +179,7 @@ mlirBytecodeDialectReaderReadString(MlirBytecodeDialectReader *reader,
       mlirBytecodeParseHandle(reader, reader->stream, &handle);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
-  *result = mlirBytecodeGetStringSectionValue(reader->callerState, handle);
-  return mlirBytecodeSuccess();
+  return mlirBytecodeGetStringSectionValue(reader->callerState, handle, result);
 }
 
 MlirBytecodeStatus
