@@ -14,6 +14,9 @@
 
 #include "mlirbcc/BytecodeTypes.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -51,6 +54,10 @@ mlirBytecodeDialectReaderReadString(MlirBytecodeDialectReader *reader,
 static MlirBytecodeStatus
 mlirBytecodeDialectReaderReadBlob(MlirBytecodeDialectReader *reader,
                                   MlirBytecodeBytesRef *result);
+
+static MlirBytecodeStatus
+mlirBytecodeDialectReaderReadResourceHandle(MlirBytecodeDialectReader *reader,
+                                            MlirBytecodeResourceHandle *handle);
 
 // FailureOr<APFloat>
 // mlirBytecodeDialectReaderReadAPFloatWithKnownSemantics(MlirBytecodeDialectReader*
@@ -170,8 +177,8 @@ mlirBytecodeDialectReaderReadString(MlirBytecodeDialectReader *reader,
       mlirBytecodeParseHandle(reader, reader->stream, &handle);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
-  // FIXME
-  return ret;
+  *result = mlirBytecodeGetStringSectionValue(reader->callerState, handle);
+  return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus
@@ -184,5 +191,12 @@ mlirBytecodeDialectReaderReadBlob(MlirBytecodeDialectReader *reader,
   return mlirBytecodeParseBytes(reader, reader->stream, result->length,
                                 &result->data);
 }
+
+MlirBytecodeStatus mlirBytecodeDialectReaderReadResourceHandle(
+    MlirBytecodeDialectReader *reader, MlirBytecodeResourceHandle *handle) {
+  return mlirBytecodeParseHandle(reader, reader->stream, handle);
+}
+
+#pragma GCC diagnostic pop
 
 #endif // MLIRBC_DIALECTBYTECODEREADER_H
