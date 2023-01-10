@@ -53,16 +53,18 @@ typedef struct MlirBytecodeStatus MlirBytecodeStatus;
 /// Populates the MlirBytecodeParserState contents for given in memory bytes.
 /// Returns an empty file if population failed.
 static MlirBytecodeParserState
-mlirBytecodePopulateParserState(void *callerState, MlirBytecodeBytesRef bytes);
+mlirBytecodePopulateParserState(void *callerState, MlirBytecodeBytesRef bytes,
+                                MlirBytecodeHandle *scratchBase,
+                                MlirBytecodeSize scratchLength);
 
 /// Parses the given MLIR file represented in memory `bytes`, calls the
 /// appropriate callbacks during parsing. This combines the parsing methods
 /// below.
-static MlirBytecodeStatus mlirBytecodeParse(void *callerState,
-                                            MlirBytecodeBytesRef bytes);
+static MlirBytecodeStatus
+mlirBytecodeParse(void *callerState, MlirBytecodeParserState *parserState);
 
 /// Returns whether the given MlirBytecodeParserState structure is empty.
-static bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *file);
+static bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *parserState);
 
 //===----------------------------------------------------------------------===//
 // Functions required to be defined:
@@ -1477,9 +1479,9 @@ bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *file) {
   return file->producer.length == 0;
 }
 
-MlirBytecodeParserState
-mlirBytecodePopulateParserState(void *callerState,
-                                const MlirBytecodeBytesRef bytes) {
+MlirBytecodeParserState mlirBytecodePopulateParserState(
+    void *callerState, const MlirBytecodeBytesRef bytes,
+    MlirBytecodeHandle *scratchBase, MlirBytecodeSize scratchLength) {
   MlirBytecodeParserState ret;
   memset(&ret, 0, sizeof(MlirBytecodeParserState));
   MlirBytecodeStream stream = mbci_populateStreamForSection(bytes);
@@ -1520,9 +1522,9 @@ mlirBytecodePopulateParserState(void *callerState,
     }
   }
 
-  // TODO: Allow passing in.
-  ret.scratchBase = 0;
-  ret.capacity = ret.size = 0;
+  ret.scratchBase = scratchBase;
+  ret.capacity = scratchLength;
+  ret.size = 0;
 
   // Mark as valid.
   ret.producer = producer;
@@ -1530,26 +1532,23 @@ mlirBytecodePopulateParserState(void *callerState,
 }
 
 MlirBytecodeStatus mlirBytecodeParse(void *callerState,
-                                     MlirBytecodeBytesRef bytes) {
-  MlirBytecodeParserState parserState =
-      mlirBytecodePopulateParserState(callerState, bytes);
-  if (mlirBytecodeParserStateEmpty(&parserState))
+                                     MlirBytecodeParserState *parserState) {
+  if (mlirBytecodeParserStateEmpty(parserState))
     return mlirBytecodeFailure();
 
   // Process the string section first.
-  if (mlirBytecodeFailed(
-          mlirBytecodeForEachString(callerState, &parserState)) ||
+  if (mlirBytecodeFailed(mlirBytecodeForEachString(callerState, parserState)) ||
       // Process the dialect section.
       mlirBytecodeFailed(
-          mlirBytecodeParseDialectSection(callerState, &parserState)) ||
+          mlirBytecodeParseDialectSection(callerState, parserState)) ||
       // Process the resource section if present.
       mlirBytecodeFailed(
-          mlirBytecodeParseResourceSection(callerState, &parserState)) ||
+          mlirBytecodeParseResourceSection(callerState, parserState)) ||
       // Process the attribute and type section.
-      mlirBytecodeFailed(mlirBytecodeParseAttributeAndTypeSection(
-          callerState, &parserState)) ||
+      mlirBytecodeFailed(
+          mlirBytecodeParseAttributeAndTypeSection(callerState, parserState)) ||
       // Finally, process the IR section.
-      mlirBytecodeFailed(mlirBytecodeParseIRSection(callerState, &parserState)))
+      mlirBytecodeFailed(mlirBytecodeParseIRSection(callerState, parserState)))
     return mlirBytecodeFailure();
 
   return mlirBytecodeSuccess();

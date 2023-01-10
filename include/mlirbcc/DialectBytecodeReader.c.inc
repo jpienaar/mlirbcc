@@ -81,6 +81,8 @@ struct MlirBytecodeAPInt {
 
 struct MlirBytecodeDialectReader {
   void *callerState;
+
+  /// Stream being parsed.
   MlirBytecodeStream *stream;
 };
 
