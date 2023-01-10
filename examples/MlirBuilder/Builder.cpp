@@ -339,10 +339,10 @@ int main(int argc, char **argv) {
       .start = ref.data, .pos = ref.data, .end = ref.data};
 
   MlirBytecodeParserState parserState =
-      mlirBytecodePopulateParserState(&stream, ref);
+      mlirBytecodePopulateParserState(&stream, ref, nullptr, 0);
   MlirbcDialectBytecodeReader reader(stream, loc);
   if (!mlirBytecodeParserStateEmpty(&parserState)) {
-    if (mlirBytecodeFailed(mlirBytecodeParse(&reader, ref)))
+    if (mlirBytecodeFailed(mlirBytecodeParse(&reader, &parserState)))
       return mlirBytecodeEmitError(&reader, "MlirBytecodeFailed to parse file"),
              1;
   }
