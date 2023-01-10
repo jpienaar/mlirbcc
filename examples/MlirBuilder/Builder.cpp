@@ -13,13 +13,15 @@
 #include "mlir/IR/Diagnostics.h"
 
 // Include bytecode parsing implementation.
-#include "mlirbcc/Parse.c.inc"
+#include "mlirbcc/BytecodeTypes.h"
 #include "mlirbcc/DialectBytecodeReader.c.inc"
+#include "mlirbcc/Parse.c.inc"
 
 using namespace mlir;
 
 struct MlirbcDialectBytecodeReader : public mlir::DialectBytecodeReader {
-  MlirbcDialectBytecodeReader(Location loc) : loc(loc){};
+  MlirbcDialectBytecodeReader(MlirBytecodeDialectReader reader, Location loc)
+      : loc(loc){};
 
   InFlightDiagnostic emitError(const Twine &msg = {}) override;
   LogicalResult readAttribute(Attribute &result) override;
@@ -31,13 +33,12 @@ struct MlirbcDialectBytecodeReader : public mlir::DialectBytecodeReader {
   readAPFloatWithKnownSemantics(const llvm::fltSemantics &semantics) override;
   LogicalResult readString(StringRef &result) override;
   LogicalResult readBlob(ArrayRef<char> &result) override;
+  FailureOr<AsmDialectResourceHandle> readResourceHandle() override;
 
   Attribute attribute(int i) const { return attributes[i]; }
   Type type(int i) const { return types[i]; }
 
-  FailureOr<AsmDialectResourceHandle> readResourceHandle() override;
-
-  MlirBytecodeStream stream;
+  MlirbcDialectBytecodeReader &reader;
 
   // These are all public to enable access via plain C functions.
   std::vector<Attribute> attributes;
@@ -54,39 +55,36 @@ InFlightDiagnostic MlirbcDialectBytecodeReader::emitError(const Twine &msg) {
 
 LogicalResult MlirbcDialectBytecodeReader::readAttribute(Attribute &result) {
   MlirBytecodeAttrHandle handle;
-  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(this, &stream, &handle)))
-    return failure();
-  if (!mlirBytecodeSucceeded(mlirBytecodeProcessAttribute(this, handle)))
+  if (!mlirBytecodeSucceeded(
+          mlirBytecodeDialectReaderReadAttribute(&reader, handle)))
     return failure();
   result = attribute(handle.id);
   return success();
 }
 
 LogicalResult MlirbcDialectBytecodeReader::readType(Type &result) {
-  MlirBytecodeAttrHandle handle;
-  if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(this, &stream, &handle)))
-    return failure();
-  if (!mlirBytecodeSucceeded(mlirBytecodeProcessType(this, handle)))
+  MlirBytecodeTypeHandle handle;
+  if (!mlirBytecodeSucceeded(
+          mlirBytecodeDialectReaderReadType(&reader, handle)))
     return failure();
   result = type(handle.id);
   return success();
 }
 
 LogicalResult MlirbcDialectBytecodeReader::readVarInt(uint64_t &result) {
-  return failure(
-      !mlirBytecodeSucceeded(mlirBytecodeParseVarInt(this, &stream, &result)));
+  return failure(!mlirBytecodeSucceeded(
+      mlirBytecodeDialectReaderReadVarInt(&reader, &result)));
 }
 
 LogicalResult MlirbcDialectBytecodeReader::readSignedVarInt(int64_t &result) {
   return failure(!mlirBytecodeSucceeded(
-      mlirBytecodeParseSignedVarInt(this, &stream, &result)));
+      mlirBytecodeDialectReaderReadSignedVarInt(&reader, &result)));
 }
 
 FailureOr<APInt>
 MlirbcDialectBytecodeReader::readAPIntWithKnownWidth(unsigned bitWidth) {
 
   MlirBytecodeAPInt result;
-  MlirBytecodeDialectReader reader = {.callerState = this, .stream = &stream};
   MlirBytecodeStatus ret =
       mlirBytecodeParseAPIntWithKnownWidth(&reader, bitWidth, malloc, &result);
   if (!mlirBytecodeSucceeded(ret))
@@ -114,24 +112,19 @@ LogicalResult MlirbcDialectBytecodeReader::readString(StringRef &result) {
   MlirBytecodeStringHandle handle;
   if (!mlirBytecodeSucceeded(mlirBytecodeParseHandle(this, &stream, &handle)))
     return failure();
-  if (handle.id >= strings.size())
+  MlirBytecodeBytesRef ref;
+  if (!mlirBytecodeSucceeded(
+          mlirBytecodeDialectReaderReadString(&reader, &ref)))
     return failure();
-  result = strings[handle.id];
+  result = StringRef(ref.data, ref.length);
   return success();
 }
 
 LogicalResult MlirbcDialectBytecodeReader::readBlob(ArrayRef<char> &result) {
-  uint64_t dataSize;
-
-  if (failed(readVarInt(dataSize)))
+  MlirBytecodeBytesRef ref;
+  if (!mlirBytecodeSucceeded(mlirBytecodeDialectReaderReadBlob(&reader, &ref)))
     return failure();
-  const uint8_t *ptr;
-  MlirBytecodeStatus ret =
-      mlirBytecodeParseBytes(this, &stream, dataSize, &ptr);
-  if (!mlirBytecodeSucceeded(ret))
-    return failure();
-
-  result = llvm::makeArrayRef(reinterpret_cast<const char *>(ptr), dataSize);
+  result = ArrayRef(ref.data, ref.length);
   return success();
 }
 
@@ -326,6 +319,11 @@ int main(int argc, char **argv) {
                               .length = buffer->getBufferSize()};
   MLIRContext context;
   auto loc = UnknownLoc::get(&context);
+  MlirBytecodeDialectReader reader = {
+      .callerState = this,
+      .stream = (MlirBytecodeStream){
+          .start = ref.data, .end = ref.data, .pos = ref.data}};
+
   MlirbcDialectBytecodeReader reader(loc);
   MlirBytecodeParserState parserState =
       mlirBytecodePopulateParserState(&reader, ref);

@@ -18,42 +18,42 @@
 extern "C" {
 #endif
 
-/// Reader struct dialect attribute & type parsing should use.
+/// Reader struct for dialect attribute & type parsing should use.
 typedef struct MlirBytecodeDialectReader MlirBytecodeDialectReader;
 
 typedef struct MlirBytecodeAPInt MlirBytecodeAPInt;
 
 static MlirBytecodeStatus
-MlirBytecodeDialectReaderReadAttribute(MlirBytecodeDialectReader *reader,
+mlirBytecodeDialectReaderReadAttribute(MlirBytecodeDialectReader *reader,
                                        MlirBytecodeAttrHandle *result);
 
 static MlirBytecodeStatus
-MlirBytecodeDialectReaderReadType(MlirBytecodeDialectReader *reader,
+mlirBytecodeDialectReaderReadType(MlirBytecodeDialectReader *reader,
                                   MlirBytecodeTypeHandle *result);
 
 static MlirBytecodeStatus
-MlirBytecodeDialectReaderReadVarInt(MlirBytecodeDialectReader *reader,
+mlirBytecodeDialectReaderReadVarInt(MlirBytecodeDialectReader *reader,
                                     uint64_t *result);
 
 static MlirBytecodeStatus
-MlirBytecodeDialectReaderReadSignedVarInt(MlirBytecodeDialectReader *reader,
+mlirBytecodeDialectReaderReadSignedVarInt(MlirBytecodeDialectReader *reader,
                                           int64_t *result);
 
 // TODO: Should allocator be a hook?
-static MlirBytecodeStatus MlirBytecodeDialectReaderReadAPIntWithKnownWidth(
+static MlirBytecodeStatus mlirBytecodeDialectReaderReadAPIntWithKnownWidth(
     MlirBytecodeDialectReader *reader, unsigned bitWidth,
     void *(*alloc)(size_t size), MlirBytecodeAPInt *);
 
 static MlirBytecodeStatus
-MlirBytecodeDialectReaderReadString(MlirBytecodeDialectReader *reader,
+mlirBytecodeDialectReaderReadString(MlirBytecodeDialectReader *reader,
                                     MlirBytecodeBytesRef *result);
 
 static MlirBytecodeStatus
-MlirBytecodeDialectReaderReadBlob(MlirBytecodeDialectReader *reader,
+mlirBytecodeDialectReaderReadBlob(MlirBytecodeDialectReader *reader,
                                   MlirBytecodeBytesRef *result);
 
 // FailureOr<APFloat>
-// MlirBytecodeDialectReaderReadAPFloatWithKnownSemantics(MlirBytecodeDialectReader*
+// mlirBytecodeDialectReaderReadAPFloatWithKnownSemantics(MlirBytecodeDialectReader*
 // reader, const llvm::fltSemantics &semantics) override;
 
 // Structure that is just sufficient to capture the bits required to materialize
@@ -76,6 +76,38 @@ struct MlirBytecodeDialectReader {
   void *callerState;
   MlirBytecodeStream *stream;
 };
+
+MlirBytecodeStatus
+mlirBytecodeDialectReaderReadAttribute(MlirBytecodeDialectReader *reader,
+                                       MlirBytecodeAttrHandle *result) {
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseHandle(reader, reader->stream, result);
+  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+    return ret;
+  return mlirBytecodeProcessAttribute(reader, *result);
+}
+
+MlirBytecodeStatus
+mlirBytecodeDialectReaderReadType(MlirBytecodeDialectReader *reader,
+                                  MlirBytecodeTypeHandle *result) {
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseHandle(reader, reader->stream, result);
+  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+    return ret;
+  return mlirBytecodeProcessType(reader, *result);
+}
+
+MlirBytecodeStatus
+mlirBytecodeDialectReaderReadVarInt(MlirBytecodeDialectReader *reader,
+                                    uint64_t *result) {
+  return mlirBytecodeParseVarInt(reader, reader->stream, result);
+}
+
+MlirBytecodeStatus
+mlirBytecodeDialectReaderReadSignedVarInt(MlirBytecodeDialectReader *reader,
+                                          int64_t *result) {
+  return mlirBytecodeParseSignedVarInt(reader, reader->stream, result);
+}
 
 MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
     MlirBytecodeDialectReader *reader, unsigned bitWidth,
@@ -129,4 +161,28 @@ MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
   }
   return mlirBytecodeSuccess();
 }
+
+MlirBytecodeStatus
+mlirBytecodeDialectReaderReadString(MlirBytecodeDialectReader *reader,
+                                    MlirBytecodeBytesRef *result) {
+  MlirBytecodeStringHandle handle;
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseHandle(reader, reader->stream, &handle);
+  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+    return ret;
+  // FIXME
+  return ret;
+}
+
+MlirBytecodeStatus
+mlirBytecodeDialectReaderReadBlob(MlirBytecodeDialectReader *reader,
+                                  MlirBytecodeBytesRef *result) {
+  MlirBytecodeStatus ret =
+      mlirBytecodeDialectReaderReadVarInt(reader, &result->length);
+  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+    return ret;
+  return mlirBytecodeParseBytes(reader, reader->stream, result->length,
+                                &result->data);
+}
+
 #endif // MLIRBC_DIALECTBYTECODEREADER_H
