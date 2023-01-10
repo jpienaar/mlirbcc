@@ -1129,9 +1129,6 @@ struct mbci_MlirIRSectionStackEntry {
   // Number of regions is assumed to be relatively small (<= 32767).
   uint16_t numRegionsRemaining : 15;
 
-  // Whether the operation is isolated from above.
-  bool isIsolatedFromAbove : 1;
-
   // Number of blocks to still complete parsing.
   // Number of regions is assumed to be relatively small (<= 65536).
   uint16_t numBlocksRemaining;
@@ -1215,6 +1212,7 @@ static MlirBytecodeStatus mbci_parseBlock(void *callerState,
   ret = mlirBytecodeOperationStateBlockPush(
       callerState, top->op,
       (MlirBytecodeHandlesRef){.handles = range, .length = numArgs});
+  mlirBytecodeEmitDebug("done block push");
   return ret;
 }
 
@@ -1348,7 +1346,7 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
       }
       ret = mlirBytecodeOperationStateAddSuccessors(
           callerState, cur->op,
-          (MlirBytecodeSizesRef){.handles = range, .length = numSuccessors});
+          (MlirBytecodeSizesRef){.sizes = range, .length = numSuccessors});
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return mlirBytecodeEmitError(callerState, "invalid successors"), ret;
     } else {
@@ -1365,7 +1363,6 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
       return mlirBytecodeEmitError(callerState, "invalid number of regions");
     }
     cur->numRegionsRemaining = numRegions;
-    cur->isIsolatedFromAbove = isIsolatedFromAbove;
     ret =
         mlirBytecodeOperationStateAddRegions(callerState, cur->op, numRegions);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))

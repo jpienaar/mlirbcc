@@ -63,7 +63,7 @@ typedef struct MlirBytecodeHandlesRef MlirBytecodeHandlesRef;
 
 struct MlirBytecodeSizesRef {
   // Pointer to the start memory address.
-  const MlirBytecodeSize *handles;
+  const MlirBytecodeSize *sizes;
   // Length of the fragment.
   MlirBytecodeSize length;
 };

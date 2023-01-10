@@ -620,7 +620,6 @@ MlirBytecodeStatus
 mlirBytecodeParseBuiltinType(void *callerState,
                              MlirBytecodeTypeHandle typeHandle,
                              MlirBytecodeBytesRef str, bool hasCustom) {
-  mlirBytecodeEmitDebug("type str = %s %d", str.data, hasCustom);
   if (!hasCustom)
     return mlirBytecodeUnhandled();
 
