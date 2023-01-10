@@ -143,10 +143,13 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeTypeCallBack(
     void *, MlirBytecodeTypeHandle, MlirBytecodeDialectHandle,
     MlirBytecodeBytesRef, bool hasCustom);
 
-/// Invoked with dialect handle and its corresponding string handle.
+/// Invoked when processing dialects.
 MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeDialectCallBack(void *, MlirBytecodeDialectHandle, size_t /*total*/,
-                            MlirBytecodeStringHandle);
+mlirBytecodeDialectsPush(void *, MlirBytecodeSize numDialects);
+
+/// Invoked with dialect handle and its corresponding string handle.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeDialectCallBack(
+    void *, MlirBytecodeDialectHandle, MlirBytecodeStringHandle);
 
 /// Invoked with opname with its dialect and string handle corresponding to its
 /// name.
@@ -803,6 +806,9 @@ mlirBytecodeParseDialectSection(void *callerState,
     return mlirBytecodeEmitError(callerState,
                                  "unable to parse number of dialects");
   mlirBytecodeEmitDebug("number of dialects = %d", numDialects);
+  ret = mlirBytecodeDialectsPush(callerState, numDialects);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+    return ret;
 
   uint64_t dialectName;
   for (uint64_t i = 0; i < numDialects; ++i) {
@@ -816,7 +822,7 @@ mlirBytecodeParseDialectSection(void *callerState,
             callerState, (MlirBytecodeDialectHandle){.id = dialectName})
             .data);
     if (mlirBytecodeFailed(mlirBytecodeDialectCallBack(
-            callerState, (MlirBytecodeDialectHandle){.id = i}, numDialects,
+            callerState, (MlirBytecodeDialectHandle){.id = i},
             (MlirBytecodeStringHandle){.id = dialectName})))
       return mlirBytecodeFailure();
   }

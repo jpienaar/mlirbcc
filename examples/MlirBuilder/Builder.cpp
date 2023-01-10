@@ -239,7 +239,6 @@ MlirBytecodeStatus mlirBytecodeTypeCallBack(void *, MlirBytecodeTypeHandle,
 
 MlirBytecodeStatus mlirBytecodeDialectCallBack(void *,
                                                MlirBytecodeDialectHandle,
-                                               size_t total,
                                                MlirBytecodeStringHandle) {
   return mlirBytecodeUnhandled();
 }
@@ -295,6 +294,11 @@ mlirBytecodeGetStringSectionValue(void *callerState,
 
 MlirBytecodeStatus mlirBytecodeAttributesPush(void *,
                                               MlirBytecodeSize numArgs) {
+  return mlirBytecodeUnhandled();
+}
+
+MlirBytecodeStatus mlirBytecodeDialectsPush(void *,
+                                            MlirBytecodeSize numDialects) {
   return mlirBytecodeUnhandled();
 }
 

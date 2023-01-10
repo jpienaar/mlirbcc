@@ -532,19 +532,26 @@ mlirBytecodeDialectOpCallBack(void *callerState, MlirBytecodeOpHandle opHdl,
   return mlirBytecodeSuccess();
 }
 
+MlirBytecodeStatus mlirBytecodeDialectsPush(void *callerState,
+                                            MlirBytecodeSize total) {
+  ParsingState *state = callerState;
+  if (state->dialectStr) {
+    free(state->dialectStr);
+  }
+  state->dialectStr = malloc(total * sizeof(*state->dialectStr));
+  memset(state->dialectStr, 0, total * sizeof(*state->dialectStr));
+  return mlirBytecodeSuccess();
+}
+
 MlirBytecodeStatus
 mlirBytecodeDialectCallBack(void *callerState,
                             MlirBytecodeDialectHandle dialectHandle,
-                            size_t total, MlirBytecodeStringHandle stringHdl) {
+                            MlirBytecodeStringHandle stringHdl) {
   ParsingState *state = callerState;
   MlirBytecodeBytesRef dialect =
       mlirBytecodeGetStringSectionValue(callerState, stringHdl);
-  mlirBytecodeEmitDebug("\t\tdialect[%d/%d] = %s", (int)dialectHandle.id,
-                        (int)total, dialect.data);
-  if (!state->dialectStr) {
-    state->dialectStr = malloc(total * sizeof(*state->dialectStr));
-    memset(state->dialectStr, 0, total * sizeof(*state->dialectStr));
-  }
+  mlirBytecodeEmitDebug("\t\tdialect[%d] = %s", (int)dialectHandle.id,
+                        dialect.data);
 
   if (dialectHandle.id < MAX_DIALECTS) {
     if (strncmp((char *)dialect.data, "builtin", dialect.length) == 0) {
