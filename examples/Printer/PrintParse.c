@@ -26,7 +26,7 @@
 // Include bytecode parsing implementation.
 #include "mlirbcc/BytecodeTypes.h"
 #include "mlirbcc/Parse.c.inc"
-//
+// Dialect attribute and types parsing hooks.
 #include "mlirbcc/DialectBytecodeReader.c.inc"
 // Dialects.
 #include "mlirbcc/BuiltinParse.c.inc"
@@ -616,7 +616,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
 
   for (uint64_t i = 0; i < typeAndLocs.length; ++i) {
     MlirBytecodeTypeHandle type = typeAndLocs.handles[2 * i];
-    MlirBytecodeAttrHandle loc = typeAndLocs.handles[2 * i + 1];
+    // MlirBytecodeAttrHandle loc = typeAndLocs.handles[2 * i + 1];
     if (first) {
       fprintf(stderr, "(");
     }
@@ -695,7 +695,6 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
   bool first = true;
   fprintf(stderr, "%*c", state->indentSize, ' ');
 
-  MlirBytecodeTypeHandle retTy;
   first = true;
   for (int i = 0, e = retTypes.length; i < e; ++i) {
     if (i != 0)
@@ -786,7 +785,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
 MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
     void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeSizesRef ref) {
-  int numSuccessors = ref.length;
+  uint64_t numSuccessors = ref.length;
   if (numSuccessors > 0) {
     fprintf(stderr, "// successors");
     for (uint64_t i = 0; i < numSuccessors; ++i)
