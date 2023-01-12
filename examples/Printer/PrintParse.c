@@ -923,6 +923,8 @@ int main(int argc, char **argv) {
       mlirBytecodeFailed(mlirBytecodeParse(&state, &parserState)))
     return mlirBytecodeEmitError(NULL, "MlirBytecodeFailed to parse file"), 1;
 
+  mlirBytecodeProcessAttribute(&state, (MlirBytecodeAttrHandle){.id = 2});
+
   if (munmap(stream, fileInfo.st_size) == -1) {
     close(fd);
     perror("Error un-mmapping the file");

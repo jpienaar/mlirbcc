@@ -90,32 +90,33 @@ MlirBytecodeStatus
 mlirBytecodeDialectReaderReadAttribute(MlirBytecodeDialectReader *reader,
                                        MlirBytecodeAttrHandle *result) {
   MlirBytecodeStatus ret =
-      mlirBytecodeParseHandle(reader, reader->stream, result);
+      mlirBytecodeParseHandle(reader->callerState, reader->stream, result);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
-  return mlirBytecodeProcessAttribute(reader, *result);
+  return mlirBytecodeProcessAttribute(reader->callerState, *result);
 }
 
 MlirBytecodeStatus
 mlirBytecodeDialectReaderReadType(MlirBytecodeDialectReader *reader,
                                   MlirBytecodeTypeHandle *result) {
   MlirBytecodeStatus ret =
-      mlirBytecodeParseHandle(reader, reader->stream, result);
+      mlirBytecodeParseHandle(reader->callerState, reader->stream, result);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
-  return mlirBytecodeProcessType(reader, *result);
+  return mlirBytecodeProcessType(reader->callerState, *result);
 }
 
 MlirBytecodeStatus
 mlirBytecodeDialectReaderReadVarInt(MlirBytecodeDialectReader *reader,
                                     uint64_t *result) {
-  return mlirBytecodeParseVarInt(reader, reader->stream, result);
+  return mlirBytecodeParseVarInt(reader->callerState, reader->stream, result);
 }
 
 MlirBytecodeStatus
 mlirBytecodeDialectReaderReadSignedVarInt(MlirBytecodeDialectReader *reader,
                                           int64_t *result) {
-  return mlirBytecodeParseSignedVarInt(reader, reader->stream, result);
+  return mlirBytecodeParseSignedVarInt(reader->callerState, reader->stream,
+                                       result);
 }
 
 MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
@@ -176,7 +177,7 @@ mlirBytecodeDialectReaderReadString(MlirBytecodeDialectReader *reader,
                                     MlirBytecodeBytesRef *result) {
   MlirBytecodeStringHandle handle;
   MlirBytecodeStatus ret =
-      mlirBytecodeParseHandle(reader, reader->stream, &handle);
+      mlirBytecodeParseHandle(reader->callerState, reader->stream, &handle);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
   return mlirBytecodeGetStringSectionValue(reader->callerState, handle, result);
@@ -189,13 +190,13 @@ mlirBytecodeDialectReaderReadBlob(MlirBytecodeDialectReader *reader,
       mlirBytecodeDialectReaderReadVarInt(reader, &result->length);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
-  return mlirBytecodeParseBytes(reader, reader->stream, result->length,
-                                &result->data);
+  return mlirBytecodeParseBytes(reader->callerState, reader->stream,
+                                result->length, &result->data);
 }
 
 MlirBytecodeStatus mlirBytecodeDialectReaderReadResourceHandle(
     MlirBytecodeDialectReader *reader, MlirBytecodeResourceHandle *handle) {
-  return mlirBytecodeParseHandle(reader, reader->stream, handle);
+  return mlirBytecodeParseHandle(reader->callerState, reader->stream, handle);
 }
 
 #pragma GCC diagnostic pop

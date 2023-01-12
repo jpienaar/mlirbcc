@@ -528,13 +528,6 @@ static MlirBytecodeStatus parseTypeAttr(void *callerState,
   return mlirBytecodeEmitError(callerState, "invalid TypeAttr");
 }
 
-MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes) {
-  MlirBytecodeStream ret;
-  ret.start = ret.pos = bytes.data;
-  ret.end = ret.start + bytes.length;
-  return ret;
-}
-
 MlirBytecodeStatus
 mlirBytecodeParseBuiltinAttr(void *callerState,
                              MlirBytecodeAttrHandle attrHandle,

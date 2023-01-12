@@ -304,6 +304,15 @@ static MlirBytecodeStatus mlirBytecodeParseNullTerminatedString(
     void *callerState, MlirBytecodeStream *stream, MlirBytecodeBytesRef *str);
 
 //===----------------------------------------------------------------------===//
+// MlirBytecodeStream.
+
+/// Create a stream from a range of bytes.
+static MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes);
+
+/// Return whether stream is empty.
+static bool mlirBytecodeStreamEmpty(MlirBytecodeStream *stream);
+
+//===----------------------------------------------------------------------===//
 // MlirBytecodeStatus.
 
 // Value representing the status of parsing. Status is either a success, failure
@@ -530,15 +539,22 @@ void mlirBytecodeEmitDebugImpl(const char *file, int line, const char *fmt,
 // Base parsing primitives.
 //=====
 
+MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes) {
+  MlirBytecodeStream ret;
+  ret.start = ret.pos = bytes.data;
+  ret.end = ret.start + bytes.length;
+  return ret;
+}
+
 // Represents simple parser state.
-static bool mbci_streamEmpty(MlirBytecodeStream *stream) {
+static bool mlirBytecodeStreamEmpty(MlirBytecodeStream *stream) {
   return stream->pos >= stream->end;
 }
 
 static MlirBytecodeStatus mlirBytecodeParseByte(void *callerState,
                                                 MlirBytecodeStream *stream,
                                                 uint8_t *val) {
-  if (MLIRBC_UNLIKELY(mbci_streamEmpty(stream)))
+  if (MLIRBC_UNLIKELY(mlirBytecodeStreamEmpty(stream)))
     return mlirBytecodeFailure();
   *val = *stream->pos++;
   return mlirBytecodeSuccess();
@@ -687,7 +703,7 @@ mbci_parseSections(void *callerState, MlirBytecodeStream *stream,
     return ret;
   uint8_t sectionID = byte & 0x7f;
 
-  mlirBytecodeEmitDebug("parsing %d of %lld", sectionID, length);
+  mlirBytecodeEmitDebug("parsing section %d of %lld", sectionID, length);
   if (MLIRBC_UNLIKELY(sectionID >= mbci_kNumSections))
     return mlirBytecodeEmitError(callerState, "invalid section ID: %d",
                                  sectionID);
@@ -828,7 +844,7 @@ mlirBytecodeParseDialectSection(void *callerState,
   }
 
   MlirBytecodeOpHandle op = {.id = 0};
-  while (!mbci_streamEmpty(&stream)) {
+  while (!mlirBytecodeStreamEmpty(&stream)) {
     uint64_t dialect, numOpNames;
     mlirBytecodeParseVarInt(callerState, &stream, &dialect);
     mlirBytecodeParseVarInt(callerState, &stream, &numOpNames);
@@ -910,7 +926,7 @@ mlirBytecodeParseAttributeAndTypeSection(void *callerState,
       ret = mlirBytecodeAttrCallBack(
           callerState, (MlirBytecodeAttrHandle){.id = i++},
           (MlirBytecodeDialectHandle){.id = dialect}, attr, hasCustomEncoding);
-      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret))) {
         mlirBytecodeEmitDebug("attr callback failed");
         return ret;
       }
@@ -960,8 +976,8 @@ mlirBytecodeParseAttributeAndTypeSection(void *callerState,
       ret = mlirBytecodeTypeCallBack(
           callerState, (MlirBytecodeTypeHandle){.id = i++},
           (MlirBytecodeDialectHandle){.id = dialect}, type, hasCustomEncoding);
-      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
-        mlirBytecodeEmitDebug("attr callback failed");
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret))) {
+        mlirBytecodeEmitDebug("type callback failed");
         return ret;
       }
       if (MLIRBC_UNLIKELY(mlirBytecodeInterrupted(ret)))
@@ -1488,7 +1504,7 @@ MlirBytecodeParserState mlirBytecodePopulateParserState(
            ret;
   mlirBytecodeEmitDebug("bytecode producer: %s\n", producer.data);
 
-  while (!mbci_streamEmpty(&stream)) {
+  while (!mlirBytecodeStreamEmpty(&stream)) {
     // Read the next section from the bytecode.
     if (mlirBytecodeFailed(
             mbci_parseSections(callerState, &stream, ret.sectionData)))
