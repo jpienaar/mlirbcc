@@ -155,9 +155,9 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeDialectCallBack(
 
 /// Invoked with opname with its dialect and string handle corresponding to its
 /// name.
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeDialectOpCallBack(void *callerState, MlirBytecodeDialectHandle,
-                              MlirBytecodeOpHandle, MlirBytecodeStringHandle);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeDialectOpCallBack(
+    void *callerState, MlirBytecodeOpHandle, MlirBytecodeDialectHandle,
+    MlirBytecodeStringHandle);
 
 /// Invoked when starting parsing of resources.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceSectionEnter(
@@ -234,12 +234,6 @@ mlirBytecodeParseAttributeAndTypeSection(void *callerState,
 static MlirBytecodeStatus
 mlirBytecodeParseDialectSection(void *callerState,
                                 MlirBytecodeParserState *parserState);
-
-/// Invoked with opname with its dialect and string handle corresponding to its
-/// name.
-static MlirBytecodeStatus
-mlirBytecodeDialectOpCallBack(void *callerState, MlirBytecodeDialectHandle,
-                              MlirBytecodeOpHandle, MlirBytecodeStringHandle);
 
 /// Parse IR section. The block args, operation and region callback
 /// are invoked during bytecode in-order walk. Additionally allows for passing
