@@ -17,6 +17,13 @@
 extern "C" {
 #endif
 
+/// Value representing the status of parsing. Status is either a success,
+/// failure unhandled or interrupted. Instances of MlirBytecodeStatus must only
+/// be inspected using the associated functions.
+typedef struct MlirBytecodeStatus MlirBytecodeStatus;
+
+/// Represents a size populated during parsing.
+/// This is purely documentative.
 typedef uint64_t MlirBytecodeSize;
 
 // Handles for the different types.
@@ -42,6 +49,12 @@ struct MlirBytecodeOperationStateHandle {
 };
 typedef struct MlirBytecodeOperationStateHandle
     MlirBytecodeOperationStateHandle;
+
+// Handle to operation.
+struct MlirBytecodeOperationHandle {
+  void *op;
+};
+typedef struct MlirBytecodeOperationHandle MlirBytecodeOperationHandle;
 
 // Reference to section of memory.
 // Does not own the underlying string. This is equivalent to llvm::StringRef.

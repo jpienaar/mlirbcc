@@ -433,7 +433,7 @@ static MlirBytecodeStatus parseIntegerAttr(void *callerState,
   // implementation what width the type handle has.
   unsigned width;
   MlirBytecodeStatus ret =
-      mlirBytecodeProcessAttribute(callerState, typeHandle);
+      mlirBytecodeParseAttribute(callerState, typeHandle);
   if (!mlirBytecodeSucceeded(ret))
     return ret;
   ret =
