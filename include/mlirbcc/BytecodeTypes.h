@@ -26,6 +26,9 @@ typedef struct MlirBytecodeStatus MlirBytecodeStatus;
 /// This is purely documentative.
 typedef uint64_t MlirBytecodeSize;
 
+/// Reader struct for dialect attribute & type parsing should use.
+typedef struct MlirBytecodeDialectReader MlirBytecodeDialectReader;
+
 // Handles for the different types.
 // Note: These should probably all be explicit structs to go beyond compiler
 // warnings and to errors. Currently this isn't done as the type is mostly used

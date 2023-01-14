@@ -863,9 +863,10 @@ MlirBytecodeStatus mlirBytecodeTypesPush(void *callerState,
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeStringCallBack(void *callerState,
-                                              MlirBytecodeStringHandle handle,
-                                              MlirBytecodeBytesRef bytes) {
+MlirBytecodeStatus
+mlirBytecodeAssociateStringRange(void *callerState,
+                                 MlirBytecodeStringHandle handle,
+                                 MlirBytecodeBytesRef bytes) {
   ParsingState *state = (ParsingState *)callerState;
   if (handle.id >= state->strings.size())
     return mlirBytecodeFailure();

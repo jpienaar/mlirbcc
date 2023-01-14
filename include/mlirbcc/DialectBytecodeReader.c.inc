@@ -21,10 +21,15 @@
 extern "C" {
 #endif
 
-/// Reader struct for dialect attribute & type parsing should use.
-typedef struct MlirBytecodeDialectReader MlirBytecodeDialectReader;
-
 typedef struct MlirBytecodeAPInt MlirBytecodeAPInt;
+
+// Parse custom bytecode and associate attr handle with parsed attribute.
+typedef MlirBytecodeStatus (*MlirBytecodeAttrParseCallBack)(
+    MlirBytecodeDialectReader* reader, MlirBytecodeAttrHandle);
+
+// Parse custom bytecode and associate type handle with parsed type.
+typedef MlirBytecodeStatus (*MlirBytecodeTypeParseCallBack)(
+    MlirBytecodeDialectReader* reader, MlirBytecodeTypeHandle);
 
 static MlirBytecodeStatus
 mlirBytecodeDialectReaderReadAttribute(MlirBytecodeDialectReader *reader,

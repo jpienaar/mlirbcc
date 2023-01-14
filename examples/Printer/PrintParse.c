@@ -156,8 +156,10 @@ MlirBytecodeStatus mlirBytecodeParseAttribute(void *callerState,
   // Attribute parsing etc should happen here.
   if (attr.dialectHandle.id < MAX_DIALECTS &&
       state->attrCallbacks[attr.dialectHandle.id]) {
-    return state->attrCallbacks[attr.dialectHandle.id](
-        callerState, handle, attr.bytes, attr.hasCustom);
+    MlirBytecodeStream stream = mlirBytecodeStreamCreate(attr.bytes);
+    MlirBytecodeDialectReader reader = {.callerState = callerState,
+                                        .stream = &stream};
+    return state->attrCallbacks[attr.dialectHandle.id](&reader, handle);
   }
 
   mlirBytecodeEmitDebug("attr unhandled");
@@ -200,8 +202,10 @@ MlirBytecodeStatus mlirBytecodeParseType(void *callerState,
   // Type parsing etc should happen here.
   if (type.dialectHandle.id < MAX_DIALECTS &&
       state->typeCallbacks[type.dialectHandle.id]) {
-    return state->typeCallbacks[type.dialectHandle.id](
-        callerState, handle, type.bytes, type.hasCustom);
+    MlirBytecodeStream stream = mlirBytecodeStreamCreate(type.bytes);
+    MlirBytecodeDialectReader reader = {.callerState = callerState,
+                                        .stream = &stream};
+    return state->typeCallbacks[type.dialectHandle.id](&reader, handle);
   }
 
   return mlirBytecodeUnhandled();
@@ -584,9 +588,10 @@ MlirBytecodeStatus mlirBytecodeStringsPush(void *callerState,
   mlirBytecodeEmitDebug("alloc'd state->strings");
   return mlirBytecodeSuccess();
 }
-MlirBytecodeStatus mlirBytecodeStringCallBack(void *callerState,
-                                              MlirBytecodeStringHandle hdl,
-                                              MlirBytecodeBytesRef bytes) {
+MlirBytecodeStatus
+mlirBytecodeAssociateStringRange(void *callerState,
+                                 MlirBytecodeStringHandle hdl,
+                                 MlirBytecodeBytesRef bytes) {
   ParsingState *state = callerState;
   state->strings[hdl.id] = bytes;
   return mlirBytecodeSuccess();
