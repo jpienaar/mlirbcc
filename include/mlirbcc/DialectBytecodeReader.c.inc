@@ -93,7 +93,7 @@ mlirBytecodeDialectReaderReadAttribute(MlirBytecodeDialectReader *reader,
       mlirBytecodeParseHandle(reader->callerState, reader->stream, result);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
-  return mlirBytecodeProcessAttribute(reader->callerState, *result);
+  return mlirBytecodeParseAttribute(reader->callerState, *result);
 }
 
 MlirBytecodeStatus
@@ -103,7 +103,7 @@ mlirBytecodeDialectReaderReadType(MlirBytecodeDialectReader *reader,
       mlirBytecodeParseHandle(reader->callerState, reader->stream, result);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
-  return mlirBytecodeProcessType(reader->callerState, *result);
+  return mlirBytecodeParseType(reader->callerState, *result);
 }
 
 MlirBytecodeStatus

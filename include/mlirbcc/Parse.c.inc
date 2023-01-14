@@ -23,6 +23,8 @@
 // mbci_. But there is more to do to differentiate between internal and
 // user-facing methods.
 
+// TODO: Support for big-endian architectures.
+
 #include "mlirbcc/BytecodeTypes.h"
 
 #include <assert.h>
@@ -45,8 +47,6 @@ extern "C" {
 // - Configs
 #define MLIRBC_IR_STACK_MAX_DEPTH 15 // TODO: add dynamic option.
 
-typedef struct MlirBytecodeStatus MlirBytecodeStatus;
-
 //===----------------------------------------------------------------------===//
 // MLIR file parsing methods.
 
@@ -58,10 +58,9 @@ mlirBytecodePopulateParserState(void *callerState, MlirBytecodeBytesRef bytes,
                                 MlirBytecodeSize scratchLength);
 
 /// Parses the given MLIR file represented in memory `bytes`, calls the
-/// appropriate callbacks during parsing. This combines the parsing methods
-/// below.
+/// appropriate callbacks during parsing and returns the parsed top-level block.
 static MlirBytecodeStatus
-mlirBytecodeParse(void *callerState, MlirBytecodeParserState *parserState);
+mlirBytecodeParse(void *callerState, MlirBytecodeParserState *parserState, void* retBlock);
 
 /// Returns whether the given MlirBytecodeParserState structure is empty.
 static bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *parserState);
@@ -70,15 +69,15 @@ static bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *parserState);
 // Functions required to be defined:
 #define MLIRBC_DEF static
 
+/// Called upon entry of IR section with argumentless block to populate.
+MLIRBC_DEF void mlirBytecodeIRSectionEnter(
+    void *callerState, void *retBlock);
+
 /// Hook to populate handle to a operation state or equivalent helper structure
 // to / collect fields required to define operation.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePush(
     void *callerState, MlirBytecodeOpHandle name, MlirBytecodeLocHandle loc,
     MlirBytecodeOperationStateHandle *opState);
-
-/// Called when finalizing population of operation state.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePop(
-    void *callerState, MlirBytecodeOperationStateHandle);
 
 /// Called for an operation with attributes.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
@@ -106,25 +105,29 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
     void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeSizesRef);
 
+/// Called when finalizing population of operation state.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePop(
+    void *callerState, MlirBytecodeOperationStateHandle, bool isIsolatedFromAbove);
+
 /// Called when entering a region with numBlocks blocks and numValues Values
 /// (including values due to block args).
 MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeRegionPush(void *callerState, MlirBytecodeOperationStateHandle,
+mlirBytecodeOperationRegionPush(void *callerState, MlirBytecodeOperationStateHandle,
                        size_t numBlocks, size_t numValues);
 
 /// Called when entering block, the argument range consists of handles.length
 /// pairs of type and location.
 /// Note: The bytecode handles ref is only valid for duration of call.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateBlockPush(
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationBlockPush(
     void *callerState, MlirBytecodeOperationStateHandle,
     MlirBytecodeHandlesRef handles);
 
 /// Called when exiting the block.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateBlockPop(
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationBlockPop(
     void *callerState, MlirBytecodeOperationStateHandle);
 
 /// Called when exiting a region.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateRegionPop(
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationRegionPop(
     void *callerState, MlirBytecodeOperationStateHandle);
 
 /// Invoked when entering attributes subsection.
@@ -132,7 +135,7 @@ MLIRBC_DEF MlirBytecodeStatus
 mlirBytecodeAttributesPush(void *callerState, MlirBytecodeSize numAttributes);
 
 /// Invoked with dialect and attribute with the attribute's range in memory.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeAttrCallBack(
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeAssociateAttributeRange(
     void *callerState, MlirBytecodeAttrHandle, MlirBytecodeDialectHandle,
     MlirBytecodeBytesRef, bool hasCustom);
 
@@ -141,7 +144,7 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeTypesPush(void *callerState,
                                                     MlirBytecodeSize numTypes);
 
 /// Invoked with dialect and type with the type's range in memory.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeTypeCallBack(
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeAssociateTypeRange(
     void *callerState, MlirBytecodeTypeHandle, MlirBytecodeDialectHandle,
     MlirBytecodeBytesRef, bool hasCustom);
 
@@ -194,13 +197,13 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeStringCallBack(
 /// This may result in triggering additional parsing and processing of
 /// attributes and types.
 MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeProcessAttribute(void *callerState, MlirBytecodeAttrHandle handle);
+mlirBytecodeParseAttribute(void *callerState, MlirBytecodeAttrHandle handle);
 
 /// Called to process a type handle and convert it into an attribute.
 /// This may result in triggering additional parsing and processing of
 /// attributes and types.
 MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeProcessType(void *callerState, MlirBytecodeTypeHandle handle);
+mlirBytecodeParseType(void *callerState, MlirBytecodeTypeHandle handle);
 
 /// Returns the requested string from the string section.
 // This isn't used here but in dialect type & attribute parsing.
@@ -235,7 +238,7 @@ static MlirBytecodeStatus
 mlirBytecodeParseDialectSection(void *callerState,
                                 MlirBytecodeParserState *parserState);
 
-/// Parse IR section. The block args, operation and region callback
+/// Parse IR section and returns populated block. The block args, operation and region callback
 /// are invoked during bytecode in-order walk. Additionally allows for passing
 /// in an opaque state.
 ///
@@ -246,7 +249,7 @@ mlirBytecodeParseDialectSection(void *callerState,
 /// Returns whether failed.
 static MlirBytecodeStatus
 mlirBytecodeParseIRSection(void *callerState,
-                           MlirBytecodeParserState *parserState);
+                           MlirBytecodeParserState *parserState, void *retBlock);
 
 /// Parse the resource section, calling MlirBytecodeResourceCallBack upon
 /// resources encountered. Returns whether failed.
@@ -315,7 +318,6 @@ static bool mlirBytecodeStreamEmpty(MlirBytecodeStream *stream);
 struct MlirBytecodeStatus {
   int8_t value;
 };
-typedef struct MlirBytecodeStatus MlirBytecodeStatus;
 
 /// Creates a status representing a success.
 inline static MlirBytecodeStatus mlirBytecodeSuccess() {
@@ -917,7 +919,7 @@ mlirBytecodeParseAttributeAndTypeSection(void *callerState,
       }
 
       // Parse & associate dialect.attr[j] with `attr`
-      ret = mlirBytecodeAttrCallBack(
+      ret = mlirBytecodeAssociateAttributeRange(
           callerState, (MlirBytecodeAttrHandle){.id = i++},
           (MlirBytecodeDialectHandle){.id = dialect}, attr, hasCustomEncoding);
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret))) {
@@ -967,7 +969,7 @@ mlirBytecodeParseAttributeAndTypeSection(void *callerState,
             "Attribute or Type entry offset points past the end of section");
       }
 
-      ret = mlirBytecodeTypeCallBack(
+      ret = mlirBytecodeAssociateTypeRange(
           callerState, (MlirBytecodeTypeHandle){.id = i++},
           (MlirBytecodeDialectHandle){.id = dialect}, type, hasCustomEncoding);
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret))) {
@@ -1210,7 +1212,7 @@ static MlirBytecodeStatus mbci_parseBlock(void *callerState,
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
-  ret = mlirBytecodeOperationStateBlockPush(
+  ret = mlirBytecodeOperationBlockPush(
       callerState, top->op,
       (MlirBytecodeHandlesRef){.handles = range, .length = numArgs});
   mlirBytecodeEmitDebug("done block push");
@@ -1240,7 +1242,7 @@ static MlirBytecodeStatus mbci_parseRegion(void *callerState,
   mlirBytecodeEmitDebug("numBlocks = %d numValues = %d", numBlocksRemaining,
                         numValues);
 
-  return mlirBytecodeRegionPush(state, top->op, top->numBlocksRemaining,
+  return mlirBytecodeOperationRegionPush(state, top->op, top->numBlocksRemaining,
                                 numValues);
 }
 
@@ -1355,9 +1357,9 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
     }
   }
 
+  bool isIsolatedFromAbove = false;
   if (encodingMask & kHasInlineRegions) {
     uint64_t numRegions = 0;
-    bool isIsolatedFromAbove = false;
     ret = mlirBytecodeParseVarIntWithFlag(callerState, stream, &numRegions,
                                           &isIsolatedFromAbove);
     if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
@@ -1368,13 +1370,16 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
         mlirBytecodeOperationStateAddRegions(callerState, cur->op, numRegions);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
-    return mbci_mlirIRSectionStackPush(callerState, stack);
   }
 
   // Completed parsing of op.
-  ret = mlirBytecodeOperationStatePop(callerState, cur->op);
+  ret = mlirBytecodeOperationStatePop(callerState, cur->op, isIsolatedFromAbove);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
+
+  if (encodingMask & kHasInlineRegions)
+    return mbci_mlirIRSectionStackPush(callerState, stack);
+
   // `cur` is the scratchpad for parsing op without region while `top` is where
   // it is being parsed.
   --mbci_getStackTop(stack)->numOpsRemaining;
@@ -1383,7 +1388,8 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
 
 MlirBytecodeStatus
 mlirBytecodeParseIRSection(void *callerState,
-                           MlirBytecodeParserState *parserState) {
+                           MlirBytecodeParserState *parserState, void *retBlock) {
+  mlirBytecodeIRSectionEnter(callerState, retBlock);
   const MlirBytecodeBytesRef irSection = mbci_getSection(parserState, mbci_kIR);
   MlirBytecodeStream stream = mbci_populateStreamForSection(irSection);
 
@@ -1395,23 +1401,22 @@ mlirBytecodeParseIRSection(void *callerState,
     return mlirBytecodeFailure();
   if (MLIRBC_UNLIKELY(hasArgs))
     return mlirBytecodeEmitError(callerState,
-                                 "IR section may not have block args");
-  if (MLIRBC_UNLIKELY(numOps != 1))
-    return mlirBytecodeEmitError(callerState,
-                                 "only one top-level op supported");
+                                 "IR section entry block may not have block args");
 
   // Initialize with parsing of top-level.
-  mbci_MlirIRSectionStack stack = {.top = -1};
-  mbci_parseOperation(callerState, parserState, &stream, &stack);
+  mbci_MlirIRSectionStack stack = {.top = 0};
+  stack.data[0].numRegionsRemaining = 1;
+  stack.data[0].numBlocksRemaining = 1;
+  stack.data[0].numOpsRemaining = numOps;
 
-  while (stack.top != -1) {
+  while (stack.data[0].numOpsRemaining) {
     mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(&stack);
 
     MlirBytecodeStatus ret;
     bool next = false;
     if (top->numOpsRemaining == 0) {
       mlirBytecodeEmitDebug("no ops remaining in block");
-      ret = mlirBytecodeOperationStateBlockPop(callerState, top->op);
+      ret = mlirBytecodeOperationBlockPop(callerState, top->op);
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
 
@@ -1421,7 +1426,7 @@ mlirBytecodeParseIRSection(void *callerState,
     }
     if (top->numBlocksRemaining == 0) {
       mlirBytecodeEmitDebug("no blocks remaining in region");
-      ret = mlirBytecodeOperationStateRegionPop(callerState, top->op);
+      ret = mlirBytecodeOperationRegionPop(callerState, top->op);
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
 
@@ -1431,10 +1436,6 @@ mlirBytecodeParseIRSection(void *callerState,
     }
     if (top->numRegionsRemaining == 0) {
       mlirBytecodeEmitDebug("no regions remaining in op");
-      ret = mlirBytecodeOperationStatePop(callerState, top->op);
-      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-        return ret;
-
       mbci_mlirIRSectionStackPop(callerState, &stack);
       --mbci_getStackTop(&stack)->numOpsRemaining;
       next = true;
@@ -1525,7 +1526,8 @@ MlirBytecodeParserState mlirBytecodePopulateParserState(
 }
 
 MlirBytecodeStatus mlirBytecodeParse(void *callerState,
-                                     MlirBytecodeParserState *parserState) {
+                                     MlirBytecodeParserState *parserState,
+                                     void* retBlock) {
   if (mlirBytecodeParserStateEmpty(parserState))
     return mlirBytecodeFailure();
 
@@ -1541,7 +1543,7 @@ MlirBytecodeStatus mlirBytecodeParse(void *callerState,
       mlirBytecodeFailed(
           mlirBytecodeParseAttributeAndTypeSection(callerState, parserState)) ||
       // Finally, process the IR section.
-      mlirBytecodeFailed(mlirBytecodeParseIRSection(callerState, parserState)))
+      mlirBytecodeFailed(mlirBytecodeParseIRSection(callerState, parserState, retBlock)))
     return mlirBytecodeFailure();
 
   return mlirBytecodeSuccess();
