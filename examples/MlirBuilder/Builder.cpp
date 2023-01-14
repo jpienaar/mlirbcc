@@ -79,6 +79,28 @@ struct BytecodeDialect {
   StringRef name;
 };
 
+struct MlirBytecodeAttributeOrTypeRange {
+  MlirBytecodeBytesRef bytes;
+  MlirBytecodeDialectHandle dialectHandle;
+  bool hasCustom;
+};
+
+struct BytecodeAttribute {
+  BytecodeAttribute() : range(), value(nullptr) {}
+  BytecodeAttribute(MlirBytecodeAttributeOrTypeRange range) : range(std::move(range)), value(nullptr) {}
+
+  MlirBytecodeAttributeOrTypeRange range;
+  Attribute value;
+};
+
+struct BytecodeType {
+  BytecodeType() : range(), value(nullptr) {}
+  BytecodeType(MlirBytecodeAttributeOrTypeRange range) : range(std::move(range)), value(nullptr) {}
+
+  MlirBytecodeAttributeOrTypeRange range;
+  Type value;
+};
+
 /// This struct represents an operation name entry within the bytecode.
 struct BytecodeOperationName {
   BytecodeOperationName(BytecodeDialect *dialect, StringRef name)
@@ -95,12 +117,6 @@ struct BytecodeOperationName {
   StringRef name;
 };
 
-struct MlirBytecodeAttributeOrTypeRange {
-  MlirBytecodeBytesRef bytes;
-  MlirBytecodeDialectHandle dialectHandle;
-  bool hasCustom;
-};
-
 struct ParsingState {
   ParsingState(Location fileLoc,
                FallbackAsmResourceMap *fallbackResourceMap = nullptr)
@@ -114,12 +130,12 @@ struct ParsingState {
     uint64_t i = handle.id;
     if (i >= attributes.size())
       return nullptr;
-    if (attributes[i])
-      return attributes[i];
+    if (attributes[i].value)
+      return attributes[i].value;
     if (!mlirBytecodeSucceeded(mlirBytecodeProcessAttribute(
             this, (MlirBytecodeAttrHandle){.id = i})))
       return nullptr;
-    return attributes[i];
+    return attributes[i].value;
   }
 
   FailureOr<Dialect *> dialect(MlirBytecodeDialectHandle handle) {
@@ -156,27 +172,20 @@ struct ParsingState {
     uint64_t i = handle.id;
     if (i >= types.size())
       return failure();
-    if (types[i])
-      return types[i];
+    if (types[i].value)
+      return types[i].value;
     if (!mlirBytecodeSucceeded(
             mlirBytecodeProcessType(this, (MlirBytecodeTypeHandle){.id = i})))
       return failure();
-    return types[i];
+    return types[i].value;
   }
-
-  // Mapping from attribute handle to range.
-  std::vector<MlirBytecodeAttributeOrTypeRange> attributeRange;
-  // Mapping from type handle to range.
-  // TODO: Should this be merged with attributes and lazily change to processed
-  // form?
-  std::vector<MlirBytecodeAttributeOrTypeRange> typeRange;
 
   // These are all public to enable access via plain C functions.
   std::vector<AsmDialectResourceHandle> resources;
-  std::vector<Attribute> attributes;
+  std::vector<BytecodeAttribute> attributes;
   std::vector<BytecodeDialect> dialects;
   std::vector<BytecodeOperationName> opNames;
-  std::vector<Type> types;
+  std::vector<BytecodeType> types;
   std::vector<StringRef> strings;
 
   std::stack<OperationState> operationStateStack;
@@ -443,17 +452,17 @@ MlirBytecodeStatus mlirBytecodeProcessAttribute(void *callerState,
     return mlirBytecodeEmitError(callerState,
                                  "invalid attribute id %" PRIu64 " / %" PRIu64,
                                  handle.id, state->attributes.size());
-  if (state->attributes[handle.id])
+  BytecodeAttribute& attr = state->attributes[handle.id];
+  if (attr.value)
     return mlirBytecodeSuccess();
 
-  MlirBytecodeAttributeOrTypeRange attr = state->attributeRange[handle.id];
-  if (attr.dialectHandle.id >= state->dialects.size())
+  if (attr.range.dialectHandle.id >= state->dialects.size())
     return mlirBytecodeEmitError(callerState,
                                  "invalid dialect id %" PRIu64 " / %" PRIu64,
-                                 attr.dialectHandle.id, state->dialects.size());
+                                 attr.range.dialectHandle.id, state->dialects.size());
 
-  auto &dialect = state->dialects[attr.dialectHandle.id];
-  if (attr.hasCustom) {
+  auto &dialect = state->dialects[attr.range.dialectHandle.id];
+  if (attr.range.hasCustom) {
     if (failed(dialect.load(state, state->fileLoc.getContext())))
       return mlirBytecodeFailure();
 
@@ -465,20 +474,20 @@ MlirBytecodeStatus mlirBytecodeProcessAttribute(void *callerState,
     }
 
     // Ask the dialect to parse the entry.
-    MlirBytecodeStream stream = mlirBytecodeStreamCreate(attr.bytes);
+    MlirBytecodeStream stream = mlirBytecodeStreamCreate(attr.range.bytes);
     MlirbcDialectBytecodeReader dialectReader(*state, stream);
-    state->attributes[handle.id] =
+    attr.value =
         dialect.interface->readAttribute(dialectReader);
-    if (!state->attributes[handle.id])
+    if (!attr.value)
       return mlirBytecodeFailure();
-    state->attributes[handle.id].dump();
     return mlirBytecodeSuccess();
-  } else {
-    auto asmStr = StringRef((const char *)attr.bytes.data, attr.bytes.length);
+  }
+    auto asmStr = StringRef((const char *)attr.range.bytes.data, attr.range.bytes.length);
     // Invoke the MLIR assembly parser to parse the entry text.
     size_t numRead = 0;
     MLIRContext *context = state->fileLoc->getContext();
-    state->attributes[handle.id] = ::parseAttribute(asmStr, context, numRead);
+    attr.value
+    = ::parseAttribute(asmStr, context, numRead);
     // Ensure there weren't dangling characters after the entry.
     if (numRead != asmStr.size()) {
       return mlirBytecodeEmitError(
@@ -486,33 +495,29 @@ MlirBytecodeStatus mlirBytecodeProcessAttribute(void *callerState,
           "trailing characters found after Attribute assembly format: %s",
           asmStr.drop_front(numRead).str().c_str());
     }
-    if (!state->attributes[handle.id])
+    if (!attr.value)
       return mlirBytecodeFailure();
-    state->attributes[handle.id].dump();
     return mlirBytecodeSuccess();
-  }
-
-  return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus mlirBytecodeProcessType(void *callerState,
                                            MlirBytecodeTypeHandle handle) {
   ParsingState *state = (ParsingState *)callerState;
-  MlirBytecodeAttributeOrTypeRange type = state->typeRange[handle.id];
   if (handle.id >= state->types.size())
     return mlirBytecodeEmitError(callerState,
                                  "invalid type id %" PRIu64 " / %" PRIu64,
                                  handle.id, state->types.size());
-  if (state->types[handle.id])
+  BytecodeType& type = state->types[handle.id];
+  if (type.value)
     return mlirBytecodeSuccess();
 
-  if (type.dialectHandle.id >= state->dialects.size())
+  if (type.range.dialectHandle.id >= state->dialects.size())
     return mlirBytecodeEmitError(callerState,
                                  "invalid dialect id %" PRIu64 " / %" PRIu64,
-                                 type.dialectHandle.id, state->dialects.size());
+                                 type.range.dialectHandle.id, state->dialects.size());
 
-  auto &dialect = state->dialects[type.dialectHandle.id];
-  if (type.hasCustom) {
+  auto &dialect = state->dialects[type.range.dialectHandle.id];
+  if (type.range.hasCustom) {
     if (failed(dialect.load(state, state->fileLoc.getContext())))
       return mlirBytecodeFailure();
 
@@ -524,20 +529,19 @@ MlirBytecodeStatus mlirBytecodeProcessType(void *callerState,
     }
 
     // Ask the dialect to parse the entry.
-    MlirBytecodeStream stream = mlirBytecodeStreamCreate(type.bytes);
+    MlirBytecodeStream stream = mlirBytecodeStreamCreate(type.range.bytes);
     MlirbcDialectBytecodeReader dialectReader(*state, stream);
-    state->types[handle.id] = dialect.interface->readType(dialectReader);
-    if (!state->types[handle.id])
+    type.value = dialect.interface->readType(dialectReader);
+    if (!type.value)
       return mlirBytecodeFailure();
-    // TEST
-    state->types[handle.id].dump();
     return mlirBytecodeSuccess();
-  } else {
-    auto asmStr = StringRef((const char *)type.bytes.data, type.bytes.length);
+  }
+
+    auto asmStr = StringRef((const char *)type.range.bytes.data, type.range.bytes.length);
     // Invoke the MLIR assembly parser to parse the entry text.
     size_t numRead = 0;
     MLIRContext *context = state->fileLoc->getContext();
-    state->types[handle.id] = ::parseType(asmStr, context, numRead);
+    type.value = ::parseType(asmStr, context, numRead);
     // Ensure there weren't dangling characters after the entry.
     if (numRead != asmStr.size()) {
       return mlirBytecodeEmitError(
@@ -545,14 +549,9 @@ MlirBytecodeStatus mlirBytecodeProcessType(void *callerState,
           "trailing characters found after Type assembly format: %s",
           asmStr.drop_front(numRead).str().c_str());
     }
-    if (!state->types[handle.id])
+    if (!type.value)
       return mlirBytecodeFailure();
-    // TEST
-    state->types[handle.id].dump();
     return mlirBytecodeSuccess();
-  }
-
-  return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus
@@ -560,9 +559,9 @@ mlirBytecodeAttrCallBack(void *callerState, MlirBytecodeAttrHandle attrHandle,
                          MlirBytecodeDialectHandle dialectHandle,
                          MlirBytecodeBytesRef bytes, bool hasCustom) {
   ParsingState *state = (ParsingState *)callerState;
-  state->attributeRange[attrHandle.id].bytes = bytes;
-  state->attributeRange[attrHandle.id].hasCustom = hasCustom;
-  state->attributeRange[attrHandle.id].dialectHandle = dialectHandle;
+  state->attributes[attrHandle.id].range = {.bytes = bytes,
+  .hasCustom = hasCustom,
+  .dialectHandle = dialectHandle};
   return mlirBytecodeSuccess();
 }
 
@@ -571,9 +570,9 @@ mlirBytecodeTypeCallBack(void *callerState, MlirBytecodeTypeHandle typeHandle,
                          MlirBytecodeDialectHandle dialectHandle,
                          MlirBytecodeBytesRef bytes, bool hasCustom) {
   ParsingState *state = (ParsingState *)callerState;
-  state->typeRange[typeHandle.id].bytes = bytes;
-  state->typeRange[typeHandle.id].hasCustom = hasCustom;
-  state->typeRange[typeHandle.id].dialectHandle = dialectHandle;
+  state->types[typeHandle.id].range = {bytes = bytes,
+  .hasCustom = hasCustom,
+  .dialectHandle = dialectHandle};
   return mlirBytecodeSuccess();
 }
 
@@ -663,7 +662,6 @@ MlirBytecodeStatus mlirBytecodeAttributesPush(void *callerState,
                                               MlirBytecodeSize numArgs) {
   ParsingState *state = (ParsingState *)callerState;
   state->attributes.resize(numArgs);
-  state->attributeRange.resize(numArgs);
   return mlirBytecodeSuccess();
 }
 
@@ -685,7 +683,6 @@ MlirBytecodeStatus mlirBytecodeTypesPush(void *callerState,
                                          MlirBytecodeSize numTypes) {
   ParsingState *state = (ParsingState *)callerState;
   state->types.resize(numTypes);
-  state->typeRange.resize(numTypes);
   return mlirBytecodeSuccess();
 }
 
