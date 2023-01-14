@@ -47,6 +47,8 @@ extern "C" {
 // - Configs
 #define MLIRBC_IR_STACK_MAX_DEPTH 15 // TODO: add dynamic option.
 
+// typedef struct MlirBytecodeOperationState *MlirBytecodeOperationStateHandle;
+
 //===----------------------------------------------------------------------===//
 // MLIR file parsing methods.
 
@@ -190,7 +192,7 @@ mlirBytecodeStringsPush(void *callerState, MlirBytecodeSize numStrings);
 
 /// Invoked with string handle in string section and
 /// bytes corresponding to the string per entry in string section.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeStringCallBack(
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeAssociateStringRange(
     void *callerState, MlirBytecodeStringHandle, MlirBytecodeBytesRef);
 
 /// Called to process an attribute handle and convert it into an attribute.
@@ -213,16 +215,6 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeGetStringSectionValue(
 
 //===----------------------------------------------------------------------===//
 // Section parsing entry points.
-
-// Parse and associate attr handle with parsed attribute.
-typedef MlirBytecodeStatus (*MlirBytecodeAttrParseCallBack)(
-    void *callerState, MlirBytecodeAttrHandle, MlirBytecodeBytesRef,
-    bool hasCustom);
-
-// Parse and associate type handle with parsed type.
-typedef MlirBytecodeStatus (*MlirBytecodeTypeParseCallBack)(
-    void *callerState, MlirBytecodeTypeHandle, MlirBytecodeBytesRef,
-    bool hasCustom);
 
 /// Iterators over attributes and types, calling MlirBytecodeAttrCallBack and
 /// MlirBytecodeTypeCallBack upon encountering Attribute or Type respectively.
@@ -790,7 +782,7 @@ mlirBytecodeForEachString(void *callerState,
     MlirBytecodeBytesRef str;
     str.data = stringSection.data + stringOffset;
     str.length = stringSize - 1;
-    ret = mlirBytecodeStringCallBack(
+    ret = mlirBytecodeAssociateStringRange(
         callerState, (MlirBytecodeStringHandle){.id = i - 1}, str);
     if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeEmitError(callerState, "string callback failed");

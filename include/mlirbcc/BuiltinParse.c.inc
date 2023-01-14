@@ -17,15 +17,13 @@ extern "C" {
 
 // Entry point for Builtin dialect Attribute parsing.
 MlirBytecodeStatus
-mlirBytecodeParseBuiltinAttr(void *callerState,
-                             MlirBytecodeAttrHandle attrHandle,
-                             MlirBytecodeBytesRef str, bool hasCustom);
+mlirBytecodeParseBuiltinAttr(MlirBytecodeDialectReader *reader,
+                             MlirBytecodeAttrHandle attrHandle);
 
 // Entry point for Builtin dialect Type parsing.
 MlirBytecodeStatus
-mlirBytecodeParseBuiltinType(void *callerState,
-                             MlirBytecodeTypeHandle typeHandle,
-                             MlirBytecodeBytesRef str, bool hasCustom);
+mlirBytecodeParseBuiltinType(MlirBytecodeDialectReader *reader,
+                             MlirBytecodeTypeHandle typeHandle);
 
 // NOTE: this is proof-of-concept and just enough working to show end-to-end.
 // The parsing of attributes/types (especially those with arrays) will change.
@@ -432,8 +430,7 @@ static MlirBytecodeStatus parseIntegerAttr(void *callerState,
   // is nothing to query the bitwidth of the type except to ask the
   // implementation what width the type handle has.
   unsigned width;
-  MlirBytecodeStatus ret =
-      mlirBytecodeParseAttribute(callerState, typeHandle);
+  MlirBytecodeStatus ret = mlirBytecodeParseAttribute(callerState, typeHandle);
   if (!mlirBytecodeSucceeded(ret))
     return ret;
   ret =
@@ -529,35 +526,29 @@ static MlirBytecodeStatus parseTypeAttr(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeParseBuiltinAttr(void *callerState,
-                             MlirBytecodeAttrHandle attrHandle,
-                             MlirBytecodeBytesRef str, bool hasCustom) {
-  if (!hasCustom)
-    return mlirBytecodeUnhandled();
-
-  MlirBytecodeStream stream = mlirBytecodeStreamCreate(str);
-  MlirBytecodeStream *pp = &stream;
-
+mlirBytecodeParseBuiltinAttr(MlirBytecodeDialectReader *reader,
+                             MlirBytecodeAttrHandle attrHandle) {
   uint64_t kind;
-  if (mlirBytecodeFailed(mlirBytecodeParseVarInt(callerState, pp, &kind)))
+  if (mlirBytecodeFailed(mlirBytecodeDialectReaderReadVarInt(reader, &kind)))
     return mlirBytecodeFailure();
   mlirBytecodeEmitDebug("builtin attr kind %d", (int)kind);
 
   switch (kind) {
   case kBuiltinAttrIntegerAttrCode:
-    return parseIntegerAttr(callerState, attrHandle, pp);
+    return parseIntegerAttr(reader->callerState, attrHandle, reader->stream);
   case kBuiltinAttrTypeAttrCode:
-    return parseTypeAttr(callerState, attrHandle, pp);
+    return parseTypeAttr(reader->callerState, attrHandle, reader->stream);
   case kBuiltinAttrDictionaryAttrCode:
-    return parseDictionaryAttr(callerState, attrHandle, pp);
+    return parseDictionaryAttr(reader->callerState, attrHandle, reader->stream);
   case kBuiltinAttrStringAttrCode:
-    return parseStringAttr(callerState, attrHandle, pp);
+    return parseStringAttr(reader->callerState, attrHandle, reader->stream);
   case kBuiltinAttrStringAttrWithTypeCode:
-    return parseStringAttrWithType(callerState, attrHandle, pp);
+    return parseStringAttrWithType(reader->callerState, attrHandle,
+                                   reader->stream);
   case kBuiltinAttrUnknownLocCode:
-    return mlirBytecodeCreateBuiltinUnknownLoc(callerState, attrHandle);
+    return mlirBytecodeCreateBuiltinUnknownLoc(reader->callerState, attrHandle);
   case kBuiltinAttrFileLineColLocCode:
-    return parseFileLineColLoc(callerState, attrHandle, pp);
+    return parseFileLineColLoc(reader->callerState, attrHandle, reader->stream);
   default:
     mlirBytecodeEmitDebug("missing parsing for builtin attr %" PRIu64 "\n",
                           kind);
@@ -610,29 +601,25 @@ parseRankedTensorType(void *callerState, MlirBytecodeAttrHandle typeHandle,
 }
 
 MlirBytecodeStatus
-mlirBytecodeParseBuiltinType(void *callerState,
-                             MlirBytecodeTypeHandle typeHandle,
-                             MlirBytecodeBytesRef str, bool hasCustom) {
-  if (!hasCustom)
-    return mlirBytecodeUnhandled();
-
-  MlirBytecodeStream stream = mlirBytecodeStreamCreate(str);
+mlirBytecodeParseBuiltinType(MlirBytecodeDialectReader *reader,
+                             MlirBytecodeTypeHandle typeHandle) {
   uint64_t kind;
-  if (mlirBytecodeFailed(mlirBytecodeParseVarInt(callerState, &stream, &kind)))
+  if (mlirBytecodeFailed(mlirBytecodeDialectReaderReadVarInt(reader, &kind)))
     return mlirBytecodeFailure();
   mlirBytecodeEmitDebug("builtin type kind %d", (int)kind);
 
   switch (kind) {
   case kBuiltinTypeIntegerTypeCode:
-    return parseIntegerType(callerState, typeHandle, &stream);
+    return parseIntegerType(reader->callerState, typeHandle, reader->stream);
   case kBuiltinTypeRankedTensorTypeCode:
-    return parseRankedTensorType(callerState, typeHandle, &stream);
+    return parseRankedTensorType(reader->callerState, typeHandle,
+                                 reader->stream);
   case kBuiltinTypeIndexTypeCode:
-    return parseIndexType(callerState, typeHandle, &stream);
+    return parseIndexType(reader->callerState, typeHandle, reader->stream);
   case kBuiltinTypeFloat32TypeCode:
-    return parseFloat32Type(callerState, typeHandle, &stream);
+    return parseFloat32Type(reader->callerState, typeHandle, reader->stream);
   case kBuiltinTypeFunctionTypeCode:
-    return parseFunctionType(callerState, typeHandle, &stream);
+    return parseFunctionType(reader->callerState, typeHandle, reader->stream);
     break;
   default:
     mlirBytecodeEmitDebug("missing parsing for builtin type %" PRIu64 "\n",
