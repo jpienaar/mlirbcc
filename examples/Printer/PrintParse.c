@@ -463,7 +463,7 @@ MlirBytecodeStatus mlirBytecodeQueryBuiltinIntegerTypeWidth(
 // ----
 
 static MlirBytecodeStatus mlirBytecodeAttributesPush(void *callerState,
-                                                     size_t total) {
+                                                     MlirBytecodeSize total) {
   ParsingState *state = callerState;
   // Note: this currently assumes that number of state->attributes don't change.
   if (state->attributes) {
@@ -491,7 +491,7 @@ mlirBytecodeAttrCallBack(void *callerState, MlirBytecodeAttrHandle attrHandle,
 }
 
 static MlirBytecodeStatus mlirBytecodeTypesPush(void *callerState,
-                                                size_t total) {
+                                                MlirBytecodeSize total) {
   ParsingState *state = callerState;
   if (state->types) {
     free(state->types);
@@ -853,7 +853,7 @@ mlirBytecodeResourceGroupEnter(void *callerState,
 MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
     void *callerState, MlirBytecodeStringHandle groupKey,
     MlirBytecodeStringHandle resourceKey, MlirBytecodeBytesRef blob) {
-  fprintf(stderr, "\t\tblob size(resource %s. %s) = %ld\n",
+  fprintf(stderr, "\t\tblob size(resource %s. %s) = %" PRIu64 "\n",
           getString(callerState, groupKey).data,
           getString(callerState, resourceKey).data, blob.length);
   return mlirBytecodeSuccess();
