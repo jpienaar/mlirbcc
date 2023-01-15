@@ -47,10 +47,9 @@ static MlirBytecodeStatus
 mlirBytecodeDialectReaderReadSignedVarInt(MlirBytecodeDialectReader *reader,
                                           int64_t *result);
 
-// TODO: Should allocator be a hook?
 static MlirBytecodeStatus mlirBytecodeDialectReaderReadAPIntWithKnownWidth(
     MlirBytecodeDialectReader *reader, unsigned bitWidth,
-    void *(*alloc)(size_t size), MlirBytecodeAPInt *);
+    void *(*allocFn)(size_t size), MlirBytecodeAPInt *result);
 
 static MlirBytecodeStatus
 mlirBytecodeDialectReaderReadString(MlirBytecodeDialectReader *reader,
@@ -63,10 +62,6 @@ mlirBytecodeDialectReaderReadBlob(MlirBytecodeDialectReader *reader,
 static MlirBytecodeStatus
 mlirBytecodeDialectReaderReadResourceHandle(MlirBytecodeDialectReader *reader,
                                             MlirBytecodeResourceHandle *handle);
-
-// FailureOr<APFloat>
-// mlirBytecodeDialectReaderReadAPFloatWithKnownSemantics(MlirBytecodeDialectReader*
-// reader, const llvm::fltSemantics &semantics) override;
 
 // Structure that is just sufficient to capture the bits required to materialize
 // a APInt.
@@ -124,7 +119,7 @@ mlirBytecodeDialectReaderReadSignedVarInt(MlirBytecodeDialectReader *reader,
                                        result);
 }
 
-MlirBytecodeStatus mlirBytecodeParseAPIntWithKnownWidth(
+MlirBytecodeStatus mlirBytecodeDialectReaderReadAPIntWithKnownWidth(
     MlirBytecodeDialectReader *reader, unsigned bitWidth,
     void *(*allocFn)(size_t size), MlirBytecodeAPInt *result) {
   result->bitWidth = bitWidth;
