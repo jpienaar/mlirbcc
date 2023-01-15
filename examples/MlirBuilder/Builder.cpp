@@ -417,8 +417,8 @@ LogicalResult MlirbcDialectBytecodeReader::readSignedVarInt(int64_t &result) {
 FailureOr<APInt>
 MlirbcDialectBytecodeReader::readAPIntWithKnownWidth(unsigned bitWidth) {
   MlirBytecodeAPInt result;
-  MlirBytecodeStatus ret =
-      mlirBytecodeParseAPIntWithKnownWidth(&reader, bitWidth, malloc, &result);
+  MlirBytecodeStatus ret = mlirBytecodeDialectReaderReadAPIntWithKnownWidth(
+      &reader, bitWidth, malloc, &result);
   if (!mlirBytecodeSucceeded(ret))
     return failure();
   if (result.bitWidth <= 64)
