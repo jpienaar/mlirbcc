@@ -28,9 +28,6 @@ mlirBytecodeParseBuiltinType(MlirBytecodeDialectReader *reader,
 // NOTE: this is proof-of-concept and just enough working to show end-to-end.
 // The parsing of attributes/types (especially those with arrays) will change.
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-
 //===----------------------------------------------------------------------===//
 // Create attributes.
 
@@ -40,10 +37,6 @@ mlirBytecodeParseBuiltinType(MlirBytecodeDialectReader *reader,
 static MlirBytecodeStatus mlirBytecodeCreateBuiltinIntegerAttr(
     void *callerState, MlirBytecodeAttrHandle attrHandle,
     MlirBytecodeTypeHandle typeHandle, uint64_t value);
-static MlirBytecodeStatus
-mlirBytecodeCreateBuiltinStrAttr(void *callerState,
-                                 MlirBytecodeAttrHandle attrHandle,
-                                 MlirBytecodeBytesRef bytes);
 static MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLoc(
     void *callerState, MlirBytecodeAttrHandle attrHandle,
     MlirBytecodeAttrHandle filename, uint64_t line, uint64_t col);
@@ -114,21 +107,6 @@ mlirBytecodeCreateBuiltinRankedTensorType(void *callerState,
 static MlirBytecodeStatus mlirBytecodeQueryBuiltinIntegerTypeWidth(
     void *callerState, MlirBytecodeTypeHandle typeHandle, unsigned *width);
 
-// Create method for UnknownLocAttr.
-static MlirBytecodeStatus
-mlirBytecodeCreateBuiltinUnknownLocAttr(void *callerState,
-                                        MlirBytecodeAttrHandle attrHandle);
-
-// Create method for FlatSymbolRefAttr.
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinFlatSymbolRefAttr(
-    void *callerState, MlirBytecodeAttrHandle attrHandle,
-    MlirBytecodeAttrHandle rootReference);
-
-// Create method for NameLocAttr.
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinNameLocAttr(
-    void *callerState, MlirBytecodeAttrHandle attrHandle,
-    MlirBytecodeAttrHandle name, MlirBytecodeAttrHandle childLoc);
-
 // Create method for StringAttr.
 static MlirBytecodeStatus
 mlirBytecodeCreateBuiltinStringAttr(void *callerState,
@@ -150,11 +128,6 @@ mlirBytecodeCreateBuiltinTypeAttr(void *callerState,
 static MlirBytecodeStatus
 mlirBytecodeCreateBuiltinUnitAttr(void *callerState,
                                   MlirBytecodeAttrHandle attrHandle);
-
-// Create method for FileLineColLocAttr.
-static MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLocAttr(
-    void *callerState, MlirBytecodeAttrHandle attrHandle,
-    MlirBytecodeAttrHandle file, uint64_t line, uint64_t col);
 
 #ifdef __cplusplus
 }
@@ -488,7 +461,7 @@ static MlirBytecodeStatus parseStringAttr(MlirBytecodeDialectReader *reader,
   if (mlirBytecodeFailed(
     mlirBytecodeDialectReaderReadString(reader,&bytes)))
     return mlirBytecodeFailure();
-  return mlirBytecodeCreateBuiltinStrAttr(reader->callerState, attrHandle, bytes);
+  return mlirBytecodeCreateBuiltinStringAttr(reader->callerState, attrHandle, bytes);
 }
 
 static MlirBytecodeStatus
@@ -539,6 +512,8 @@ mlirBytecodeParseBuiltinAttr(MlirBytecodeDialectReader *reader,
     return mlirBytecodeCreateBuiltinUnknownLoc(reader, attrHandle);
   case kBuiltinAttrFileLineColLocCode:
     return parseFileLineColLoc(reader, attrHandle);
+  case kBuiltinAttrUnitAttrCode:
+    return mlirBytecodeCreateBuiltinUnitAttr(reader->callerState, attrHandle);
   default:
     mlirBytecodeEmitDebug("missing parsing for builtin attr %" PRIu64 "\n",
                           kind);
@@ -614,5 +589,3 @@ mlirBytecodeParseBuiltinType(MlirBytecodeDialectReader *reader,
 
   return mlirBytecodeSuccess();
 }
-
-#pragma GCC diagnostic pop

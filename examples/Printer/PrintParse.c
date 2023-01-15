@@ -247,6 +247,19 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLoc(
 }
 
 MlirBytecodeStatus
+mlirBytecodeCreateBuiltinUnitAttr(void *callerState,
+                                  MlirBytecodeAttrHandle attrHandle) {
+  ParsingState *state = callerState;
+  int len = sizeof("Unit");
+  state->attributes[attrHandle.id].data = (uint8_t *)malloc(len);
+  state->attributes[attrHandle.id].length =
+      snprintf((char *)state->attributes[attrHandle.id].data, len, "Unit");
+
+  mlirBytecodeEmitDebug("%s", state->attributes[attrHandle.id].data);
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus
 mlirBytecodeCreateBuiltinUnknownLoc(void *callerState,
                                     MlirBytecodeAttrHandle attrHandle) {
   ParsingState *state = callerState;
@@ -260,9 +273,9 @@ mlirBytecodeCreateBuiltinUnknownLoc(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeCreateBuiltinStrAttr(void *callerState,
-                                 MlirBytecodeAttrHandle attrHandle,
-                                 MlirBytecodeBytesRef str) {
+mlirBytecodeCreateBuiltinStringAttr(void *callerState,
+                                    MlirBytecodeAttrHandle attrHandle,
+                                    MlirBytecodeBytesRef str) {
   ParsingState *state = callerState;
   int len = str.length + 3;
   state->attributes[attrHandle.id].data = (uint8_t *)malloc(len);
