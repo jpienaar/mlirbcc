@@ -853,6 +853,7 @@ mlirBytecodeOperationStatePop(void *callerState,
       return mlirBytecodeSuccess();
   if (!opState->hasRegions)
     printf("\n");
+  *opHandle = opStateHandle;
   return mlirBytecodeSuccess();
 }
 
