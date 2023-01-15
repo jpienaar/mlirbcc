@@ -46,19 +46,6 @@ typedef MlirBytecodeHandle MlirBytecodeResourceHandle;
 typedef MlirBytecodeHandle MlirBytecodeStringHandle;
 typedef MlirBytecodeHandle MlirBytecodeTypeHandle;
 
-// Handle to operation state.
-struct MlirBytecodeOperationStateHandle {
-  void *state;
-};
-typedef struct MlirBytecodeOperationStateHandle
-    MlirBytecodeOperationStateHandle;
-
-// Handle to operation.
-struct MlirBytecodeOperationHandle {
-  void *op;
-};
-typedef struct MlirBytecodeOperationHandle MlirBytecodeOperationHandle;
-
 // Reference to section of memory.
 // Does not own the underlying string. This is equivalent to llvm::StringRef.
 struct MlirBytecodeBytesRef {
