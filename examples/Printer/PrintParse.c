@@ -23,6 +23,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+// Parsing inc configuration.
+typedef struct MlirBytecodeOperationState MlirBytecodeOperationState;
+typedef struct MlirBytecodeOperationState MlirBytecodeOperation;
 // Include bytecode parsing implementation.
 #include "mlirbcc/BytecodeTypes.h"
 #include "mlirbcc/Parse.c.inc"
@@ -47,7 +50,6 @@ struct MlirBytecodeOperationState {
   bool hasResults;
   bool hasSuccessors;
 };
-typedef struct MlirBytecodeOperationState MlirBytecodeOperationState;
 
 typedef struct MlirMutableBytesRef MlirMutableBytesRef;
 typedef MlirMutableBytesRef MlirBytecodeAttribute;
@@ -615,7 +617,7 @@ MlirBytecodeStatus mlirBytecodeOperationStatePush(
     MlirBytecodeOperationStateHandle *opStateHandle) {
   MlirBytecodeOperationState *opState = &states[stateDepth++];
   mlirBytecodeEmitDebug("operation state push [depth = %d]", stateDepth);
-  opStateHandle->state = (void *)opState;
+  *opStateHandle = opState;
   opState->name = name;
   opState->loc = loc;
   opState->attrDict.id = kMlirBytecodeHandleSentinel;
@@ -630,7 +632,7 @@ MlirBytecodeStatus mlirBytecodeOperationStatePush(
 
 MlirBytecodeStatus
 mlirBytecodeOperationBlockPush(void *callerState,
-                               MlirBytecodeOperationStateHandle opStateHandle,
+                               MlirBytecodeOperationHandle opHandle,
                                MlirBytecodeHandlesRef typeAndLocs) {
   ParsingState *state = callerState;
   bool first = true;
@@ -662,7 +664,7 @@ mlirBytecodeOperationBlockPush(void *callerState,
 
 MlirBytecodeStatus
 mlirBytecodeOperationBlockPop(void *callerState,
-                              MlirBytecodeOperationStateHandle opStateHandle) {
+                              MlirBytecodeOperationHandle opHandle) {
   ParsingState *state = callerState;
   state->indentSize -= 2;
   return mlirBytecodeSuccess();
@@ -670,10 +672,10 @@ mlirBytecodeOperationBlockPop(void *callerState,
 
 MlirBytecodeStatus
 mlirBytecodeOperationRegionPush(void *callerState,
-                                MlirBytecodeOperationStateHandle opStateHandle,
+                                MlirBytecodeOperationHandle opHandle,
                                 size_t numBlocks, size_t numValues) {
   ParsingState *state = callerState;
-  MlirBytecodeOperationState *opState = opStateHandle.state;
+  MlirBytecodeOperationState *opState = opHandle;
   if (state->depth + 1 == MAX_DEPTH)
     return mlirBytecodeUnhandled();
 
@@ -702,7 +704,7 @@ mlirBytecodeOperationRegionPop(void *callerState,
 MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
     void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeAttrHandle attrs) {
-  MlirBytecodeOperationState *opState = opStateHandle.state;
+  MlirBytecodeOperationState *opState = opStateHandle;
   opState->attrDict = attrs;
   return mlirBytecodeSuccess();
 }
@@ -760,7 +762,7 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
 MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
     void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeHandlesRef ref) {
-  MlirBytecodeOperationState *opState = opStateHandle.state;
+  MlirBytecodeOperationState *opState = opStateHandle;
   opState->hasResults = true;
   return printOperationPrefix(callerState, opState, ref);
 }
@@ -768,7 +770,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
 MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
     void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeHandlesRef ref) {
-  MlirBytecodeOperationState *opState = opStateHandle.state;
+  MlirBytecodeOperationState *opState = opStateHandle;
   if (!opState->hasResults)
     if (!mlirBytecodeSucceeded(printOperationPrefix(
             callerState, opState,
@@ -792,8 +794,8 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
     void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
-    uint64_t n) {
-  MlirBytecodeOperationState *opState = opStateHandle.state;
+    uint64_t n, bool isIsolatedFromAbove) {
+  MlirBytecodeOperationState *opState = opStateHandle;
   mlirBytecodeEmitDebug("numRegions = %d", (int)n);
   if (!opState->hasResults && !opState->hasOperands)
     if (!mlirBytecodeSucceeded(printOperationPrefix(
@@ -801,6 +803,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
             (MlirBytecodeHandlesRef){.handles = NULL, .length = 0})))
       return mlirBytecodeSuccess();
   opState->hasRegions = true;
+  opState->isIsolated = isIsolatedFromAbove;
   printf("\n");
   return mlirBytecodeSuccess();
 }
@@ -808,7 +811,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
 MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
     void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeSizesRef ref) {
-  MlirBytecodeOperationState *opState = opStateHandle.state;
+  MlirBytecodeOperationState *opState = opStateHandle;
   uint64_t numSuccessors = ref.length;
   if (!opState->hasResults && !opState->hasOperands && !opState->hasRegions)
     if (!mlirBytecodeSucceeded(printOperationPrefix(
@@ -827,8 +830,8 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
 MlirBytecodeStatus
 mlirBytecodeOperationStatePop(void *callerState,
                               MlirBytecodeOperationStateHandle opStateHandle,
-                              bool isIsolatedFromAbove) {
-  MlirBytecodeOperationState *opState = opStateHandle.state;
+                              MlirBytecodeOperationHandle *opHandle) {
+  MlirBytecodeOperationState *opState = opStateHandle;
   mlirBytecodeEmitDebug("operation state pop [from depth = %d]", stateDepth);
   --stateDepth;
   if (!opState->hasResults && !opState->hasOperands && !opState->hasRegions &&
@@ -839,12 +842,6 @@ mlirBytecodeOperationStatePop(void *callerState,
       return mlirBytecodeSuccess();
   if (!opState->hasRegions)
     printf("\n");
-  opState->isIsolated = isIsolatedFromAbove;
-  return mlirBytecodeSuccess();
-}
-
-MlirBytecodeStatus mlirBytecodeIsolatedOperationExit(void *callerState,
-                                                     bool isIsolated) {
   return mlirBytecodeSuccess();
 }
 

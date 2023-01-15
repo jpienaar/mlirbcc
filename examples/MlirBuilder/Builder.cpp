@@ -26,6 +26,9 @@
 #include <optional>
 #include <stack>
 
+// Parsing inc configuration.
+typedef mlir::OperationState MlirBytecodeOperationState;
+typedef mlir::Operation MlirBytecodeOperation;
 // Include bytecode parsing implementation.
 #include "mlirbcc/BytecodeTypes.h"
 #include "mlirbcc/Parse.c.inc"
@@ -492,17 +495,17 @@ mlirBytecodeOperationStatePush(void *callerState, MlirBytecodeOpHandle opHandle,
     return mlirBytecodeFailure();
   state->wipOperationState.location = locAttr;
   state->wipOperationState.name = *opName;
-  opState->state = &state->wipOperationState;
+  *opState = &state->wipOperationState;
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
-    void *callerState, MlirBytecodeOperationStateHandle opHandle,
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeAttrHandle dictHandle) {
   ParsingState *state = (ParsingState *)callerState;
   if (dictHandle.id >= state->attributes.size())
     return mlirBytecodeEmitError(callerState, "out of range attribute handle");
-  OperationState *opState = (OperationState *)opHandle.state;
+  OperationState *opState = opStateHandle;
   DictionaryAttr attr =
       dyn_cast_if_present<DictionaryAttr>(state->attribute(dictHandle));
   if (!attr)
@@ -512,10 +515,10 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
-    void *callerState, MlirBytecodeOperationStateHandle opHandle,
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeHandlesRef types) {
   ParsingState *state = (ParsingState *)callerState;
-  OperationState *opState = (OperationState *)opHandle.state;
+  OperationState *opState = opStateHandle;
 
   SmallVector<Type> resultTypes;
   resultTypes.reserve(types.length);
@@ -531,12 +534,11 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus
-mlirBytecodeOperationStateAddOperands(void *callerState,
-                                      MlirBytecodeOperationStateHandle opHandle,
-                                      MlirBytecodeHandlesRef operands) {
+MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeHandlesRef operands) {
   ParsingState *state = (ParsingState *)callerState;
-  OperationState *opState = (OperationState *)opHandle.state;
+  OperationState *opState = opStateHandle;
 
   const uint64_t numOperands = operands.length;
   opState->operands.resize(numOperands);
@@ -547,23 +549,24 @@ mlirBytecodeOperationStateAddOperands(void *callerState,
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus
-mlirBytecodeOperationStateAddRegions(void *callerState,
-                                     MlirBytecodeOperationStateHandle opHandle,
-                                     uint64_t numRegions) {
-  OperationState *opState = (OperationState *)opHandle.state;
+MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    uint64_t numRegions, bool isIsolatedFromAbove) {
+  OperationState *opState = opStateHandle;
   opState->regions.reserve(numRegions);
   for (int i = 0, e = numRegions; i < e; ++i)
     opState->regions.push_back(std::make_unique<Region>());
+
+  // TODO: isIsolatedFromAbove
 
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
-    void *callerState, MlirBytecodeOperationStateHandle opHandle,
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeSizesRef successors) {
   ParsingState *state = (ParsingState *)callerState;
-  OperationState *opState = (OperationState *)opHandle.state;
+  OperationState *opState = opStateHandle;
 
   const uint64_t numSuccs = successors.length;
   RegionReadState &readState = state->regionStack.back();
@@ -579,51 +582,48 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
 
 MlirBytecodeStatus
 mlirBytecodeOperationStatePop(void *callerState,
-                              MlirBytecodeOperationStateHandle handle,
-                              bool isIsolatedFromAbove) {
+                              MlirBytecodeOperationStateHandle opStateHandle,
+                              MlirBytecodeOperationHandle *opHandle) {
   ParsingState *state = (ParsingState *)callerState;
-  OperationState *opState = (OperationState *)handle.state;
+  OperationState *opState = opStateHandle;
 
   // Create the operation at the back of the current block.
   Operation *op = Operation::create(*opState);
+  *opHandle = op;
 
   // If the operation had results, update the value references.
   if (op->getNumResults() && failed(defineValues(*state, op->getResults())))
     return mlirBytecodeEmitError(callerState, "invalid operation results");
 
-  if (!opState->regions.empty()) {
-    state->regionStack.emplace_back(op, isIsolatedFromAbove);
-    RegionReadState &readState = state->regionStack.back();
-    (*readState.curBlock)->push_back(op);
-  }
+  // if (!opState->regions.empty()) {
+  //   state->regionStack.emplace_back(op, isIsolatedFromAbove);
+  //   RegionReadState &readState = state->regionStack.back();
+  //   (*readState.curBlock)->push_back(op);
+  // }
 
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus
-mlirBytecodeOperationRegionPush(void *callerState,
-                                MlirBytecodeOperationStateHandle,
-                                size_t numBlocks, size_t numValues) {
+MlirBytecodeStatus mlirBytecodeOperationRegionPush(void *callerState,
+                                                   MlirBytecodeOperationHandle,
+                                                   size_t numBlocks,
+                                                   size_t numValues) {
   return mlirBytecodeUnhandled();
 }
 
-// this function returns.
-MlirBytecodeStatus
-mlirBytecodeOperationBlockPush(void *callerState,
-                               MlirBytecodeOperationStateHandle,
-                               MlirBytecodeHandlesRef) {
+MlirBytecodeStatus mlirBytecodeOperationBlockPush(void *callerState,
+                                                  MlirBytecodeOperationHandle,
+                                                  MlirBytecodeHandlesRef) {
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus
-mlirBytecodeOperationBlockPop(void *callerState,
-                              MlirBytecodeOperationStateHandle) {
+MlirBytecodeStatus mlirBytecodeOperationBlockPop(void *callerState,
+                                                 MlirBytecodeOperationHandle) {
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus
-mlirBytecodeOperationRegionPop(void *callerState,
-                               MlirBytecodeOperationStateHandle) {
+MlirBytecodeStatus mlirBytecodeOperationRegionPop(void *callerState,
+                                                  MlirBytecodeOperationHandle) {
   return mlirBytecodeUnhandled();
 }
 

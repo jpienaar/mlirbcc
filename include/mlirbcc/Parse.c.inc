@@ -47,7 +47,9 @@ extern "C" {
 // - Configs
 #define MLIRBC_IR_STACK_MAX_DEPTH 15 // TODO: add dynamic option.
 
-// typedef struct MlirBytecodeOperationState *MlirBytecodeOperationStateHandle;
+// - Types needed to be defined before including this file.
+typedef MlirBytecodeOperationState *MlirBytecodeOperationStateHandle;
+typedef MlirBytecodeOperation *MlirBytecodeOperationHandle;
 
 //===----------------------------------------------------------------------===//
 // MLIR file parsing methods.
@@ -100,37 +102,37 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
 
 /// Called for operations with regions.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
-    void *callerState, MlirBytecodeOperationStateHandle, uint64_t numRegions);
+    void *callerState, MlirBytecodeOperationStateHandle, uint64_t numRegions, bool isIsolatedFromAbove);
 
 /// Called for operations with successors.
 /// Note: The bytecode ref is only valid for duration of call.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
     void *callerState, MlirBytecodeOperationStateHandle, MlirBytecodeSizesRef);
 
-/// Called when finalizing population of operation state.
+/// Called when finalizing population all operation state excluding regions/blocks.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePop(
-    void *callerState, MlirBytecodeOperationStateHandle, bool isIsolatedFromAbove);
+    void *callerState, MlirBytecodeOperationStateHandle opStateHandle, MlirBytecodeOperationHandle* opHandle);
 
 /// Called when entering a region with numBlocks blocks and numValues Values
 /// (including values due to block args).
 MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeOperationRegionPush(void *callerState, MlirBytecodeOperationStateHandle,
+mlirBytecodeOperationRegionPush(void *callerState, MlirBytecodeOperationHandle,
                        size_t numBlocks, size_t numValues);
 
 /// Called when entering block, the argument range consists of handles.length
 /// pairs of type and location.
 /// Note: The bytecode handles ref is only valid for duration of call.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationBlockPush(
-    void *callerState, MlirBytecodeOperationStateHandle,
+    void *callerState, MlirBytecodeOperationHandle,
     MlirBytecodeHandlesRef handles);
 
 /// Called when exiting the block.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationBlockPop(
-    void *callerState, MlirBytecodeOperationStateHandle);
+    void *callerState, MlirBytecodeOperationHandle);
 
 /// Called when exiting a region.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationRegionPop(
-    void *callerState, MlirBytecodeOperationStateHandle);
+    void *callerState, MlirBytecodeOperationHandle);
 
 /// Invoked when entering attributes subsection.
 MLIRBC_DEF MlirBytecodeStatus
@@ -422,6 +424,7 @@ enum {
   mbci_kNumSections = 7,
 };
 
+#ifdef MLIRBC_VERBOSE_ERROR
 static const char *mbci_sectionIDToString(uint8_t id) {
   const char *arr[] = {
       "String (0)",         //
@@ -435,6 +438,7 @@ static const char *mbci_sectionIDToString(uint8_t id) {
   assert(id < sizeof(arr) / sizeof(arr[0]));
   return arr[id];
 }
+#endif
 
 static bool mbci_isSectionOptional(int id) {
   switch (id) {
@@ -1117,8 +1121,11 @@ enum {
 // We keep the following on the stack for a op with regions when descending into
 // regions:
 struct mbci_MlirIRSectionStackEntry {
-  // State of parent op as currently populated.
-  MlirBytecodeOperationStateHandle op;
+  union {
+    // State of parent op as currently populated.
+    MlirBytecodeOperationStateHandle opState;
+    MlirBytecodeOperationHandle op;
+  };
 
   // Number of regions to still complete parsing.
   // Number of regions is assumed to be relatively small (<= 32767).
@@ -1267,7 +1274,7 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
     return mlirBytecodeEmitError(callerState, "invalid operation location");
 
   mbci_MlirIRSectionStackEntry *cur = mbci_getStackWIP(stack);
-  ret = mlirBytecodeOperationStatePush(callerState, name, loc, &cur->op);
+  ret = mlirBytecodeOperationStatePush(callerState, name, loc, &cur->opState);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
 
@@ -1279,7 +1286,7 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
                                            ))) {
       return mlirBytecodeEmitError(callerState, "invalid op attribute handle");
     }
-    ret = mlirBytecodeOperationStateAddAttributeDictionary(callerState, cur->op,
+    ret = mlirBytecodeOperationStateAddAttributeDictionary(callerState, cur->opState,
                                                            attrDict);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return mlirBytecodeEmitDebug("unable to add attributes"), ret;
@@ -1299,7 +1306,7 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
         return ret;
     }
     ret = mlirBytecodeOperationStateAddResultTypes(
-        callerState, cur->op,
+        callerState, cur->opState,
         (MlirBytecodeHandlesRef){.handles = range, .length = numResults});
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
@@ -1317,7 +1324,7 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
           return ret;
       }
       ret = mlirBytecodeOperationStateAddOperands(
-          callerState, cur->op,
+          callerState, cur->opState,
           (MlirBytecodeHandlesRef){.handles = range, .length = numOperands});
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return mlirBytecodeEmitError(callerState, "invalid operands"), ret;
@@ -1340,7 +1347,7 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
           return ret;
       }
       ret = mlirBytecodeOperationStateAddSuccessors(
-          callerState, cur->op,
+          callerState, cur->opState,
           (MlirBytecodeSizesRef){.sizes = range, .length = numSuccessors});
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return mlirBytecodeEmitError(callerState, "invalid successors"), ret;
@@ -1349,9 +1356,9 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
     }
   }
 
-  bool isIsolatedFromAbove = false;
   if (encodingMask & kHasInlineRegions) {
     uint64_t numRegions = 0;
+    bool isIsolatedFromAbove = false;
     ret = mlirBytecodeParseVarIntWithFlag(callerState, stream, &numRegions,
                                           &isIsolatedFromAbove);
     if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
@@ -1359,13 +1366,15 @@ mbci_parseOperation(void *callerState, MlirBytecodeParserState *parserState,
     }
     cur->numRegionsRemaining = numRegions;
     ret =
-        mlirBytecodeOperationStateAddRegions(callerState, cur->op, numRegions);
+        mlirBytecodeOperationStateAddRegions(callerState, cur->opState, numRegions, isIsolatedFromAbove);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
 
-  // Completed parsing of op.
-  ret = mlirBytecodeOperationStatePop(callerState, cur->op, isIsolatedFromAbove);
+  // Completed parsing of op proper, regions potentially remaining.
+  MlirBytecodeOperationHandle opHandle;
+  ret = mlirBytecodeOperationStatePop(callerState, cur->opState, &opHandle);
+  cur->op = opHandle;
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
 
