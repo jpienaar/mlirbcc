@@ -69,11 +69,13 @@ struct MlirMutableBytesRef {
 #define MAX_DIALECTS 10
 #define MAX_DEPTH 10
 
-typedef struct {
+struct MlirBytecodeAttributeOrTypeRange {
   MlirBytecodeBytesRef bytes;
   MlirBytecodeDialectHandle dialectHandle;
   bool hasCustom;
-} MlirBytecodeAttributeOrTypeRange;
+};
+typedef struct MlirBytecodeAttributeOrTypeRange
+    MlirBytecodeAttributeOrTypeRange;
 
 struct ParsingState {
   MlirBytecodeStringHandle *dialectStr;
@@ -111,31 +113,42 @@ struct ParsingState {
 };
 typedef struct ParsingState ParsingState;
 
-MlirBytecodeBytesRef getString(void *callerState,
-                               MlirBytecodeStringHandle hdl) {
-  ParsingState *state = callerState;
+#ifdef MLIRBC_VERBOSE_ERROR
+MlirBytecodeStatus mlirBytecodeEmitErrorImpl(void *context, const char *fmt,
+                                             ...) {
+  va_list args;
+  va_start(args, fmt);
+  vfprintf(stderr, fmt, args);
+  va_end(args);
+  fprintf(stderr, "\n");
+
+  return mlirBytecodeFailure();
+}
+#endif
+
+MlirBytecodeBytesRef getString(void *context, MlirBytecodeStringHandle hdl) {
+  ParsingState *state = context;
   assert(state->strings);
   return state->strings[hdl.id];
 }
 
 MlirBytecodeStatus
-mlirBytecodeGetStringSectionValue(void *callerState,
-                                  MlirBytecodeStringHandle idx,
+mlirBytecodeGetStringSectionValue(void *context, MlirBytecodeStringHandle idx,
                                   MlirBytecodeBytesRef *result) {
-  *result = getString(callerState, idx);
+  *result = getString(context, idx);
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeOpRef mlirBytecodeGetOpName(void *callerState,
+MlirBytecodeOpRef mlirBytecodeGetOpName(void *context,
                                         MlirBytecodeOpHandle hdl) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   assert(state->ops);
   return state->ops[hdl.id];
 }
 
-MlirBytecodeStatus mlirBytecodeParseAttribute(void *callerState,
+MlirBytecodeStatus mlirBytecodeParseAttribute(void *context,
                                               MlirBytecodeAttrHandle handle) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   if (!state->attributes)
     return mlirBytecodeUnhandled();
 
@@ -159,8 +172,7 @@ MlirBytecodeStatus mlirBytecodeParseAttribute(void *callerState,
   if (attr.dialectHandle.id < MAX_DIALECTS &&
       state->attrCallbacks[attr.dialectHandle.id]) {
     MlirBytecodeStream stream = mlirBytecodeStreamCreate(attr.bytes);
-    MlirBytecodeDialectReader reader = {.callerState = callerState,
-                                        .stream = &stream};
+    MlirBytecodeDialectReader reader = {.context = context, .stream = &stream};
     return state->attrCallbacks[attr.dialectHandle.id](&reader, handle);
   }
 
@@ -168,19 +180,18 @@ MlirBytecodeStatus mlirBytecodeParseAttribute(void *callerState,
   return mlirBytecodeUnhandled();
 }
 
-MlirMutableBytesRef getAttribute(void *callerState,
-                                 MlirBytecodeAttrHandle attr) {
+MlirMutableBytesRef getAttribute(void *context, MlirBytecodeAttrHandle attr) {
   static char empty[] = "<<unknown>>";
-  ParsingState *state = callerState;
-  if (mlirBytecodeSucceeded(mlirBytecodeParseAttribute(callerState, attr)))
+  ParsingState *state = context;
+  if (mlirBytecodeSucceeded(mlirBytecodeParseAttribute(context, attr)))
     return state->attributes[attr.id];
   return (MlirMutableBytesRef){.data = (uint8_t *)&empty[0],
                                .length = sizeof(empty)};
 }
 
-MlirBytecodeStatus mlirBytecodeParseType(void *callerState,
+MlirBytecodeStatus mlirBytecodeParseType(void *context,
                                          MlirBytecodeTypeHandle handle) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   if (!state->types)
     return mlirBytecodeUnhandled();
 
@@ -205,18 +216,17 @@ MlirBytecodeStatus mlirBytecodeParseType(void *callerState,
   if (type.dialectHandle.id < MAX_DIALECTS &&
       state->typeCallbacks[type.dialectHandle.id]) {
     MlirBytecodeStream stream = mlirBytecodeStreamCreate(type.bytes);
-    MlirBytecodeDialectReader reader = {.callerState = callerState,
-                                        .stream = &stream};
+    MlirBytecodeDialectReader reader = {.context = context, .stream = &stream};
     return state->typeCallbacks[type.dialectHandle.id](&reader, handle);
   }
 
   return mlirBytecodeUnhandled();
 }
 
-MlirMutableBytesRef getType(void *callerState, MlirBytecodeTypeHandle type) {
+MlirMutableBytesRef getType(void *context, MlirBytecodeTypeHandle type) {
   static char empty[] = "<<unknown>>";
-  ParsingState *state = callerState;
-  if (mlirBytecodeSucceeded(mlirBytecodeParseType(callerState, type)))
+  ParsingState *state = context;
+  if (mlirBytecodeSucceeded(mlirBytecodeParseType(context, type)))
     return state->types[type.id];
   return (MlirMutableBytesRef){.data = (uint8_t *)&empty[0],
                                .length = sizeof(empty)};
@@ -226,13 +236,13 @@ MlirMutableBytesRef getType(void *callerState, MlirBytecodeTypeHandle type) {
 // Define dialect construction methods.
 
 MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLoc(
-    void *callerState, MlirBytecodeAttrHandle attrHandle,
+    void *context, MlirBytecodeAttrHandle attrHandle,
     MlirBytecodeAttrHandle filename, uint64_t line, uint64_t col) {
-  ParsingState *state = callerState;
-  MlirBytecodeStatus ret = mlirBytecodeParseAttribute(callerState, filename);
+  ParsingState *state = context;
+  MlirBytecodeStatus ret = mlirBytecodeParseAttribute(context, filename);
   if (!mlirBytecodeSucceeded(ret))
     return ret;
-  MlirMutableBytesRef str = getAttribute(callerState, filename);
+  MlirMutableBytesRef str = getAttribute(context, filename);
   // Should avoid log here ...
   int len = str.length + sizeof("FileLineColLoc(::)") + ceil(log10(line + 1)) +
             ceil(log10(col + 1)) + 1;
@@ -247,9 +257,9 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinFileLineColLoc(
 }
 
 MlirBytecodeStatus
-mlirBytecodeCreateBuiltinUnitAttr(void *callerState,
+mlirBytecodeCreateBuiltinUnitAttr(void *context,
                                   MlirBytecodeAttrHandle attrHandle) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   int len = sizeof("Unit");
   state->attributes[attrHandle.id].data = (uint8_t *)malloc(len);
   state->attributes[attrHandle.id].length =
@@ -260,9 +270,9 @@ mlirBytecodeCreateBuiltinUnitAttr(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeCreateBuiltinUnknownLoc(void *callerState,
+mlirBytecodeCreateBuiltinUnknownLoc(void *context,
                                     MlirBytecodeAttrHandle attrHandle) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   int len = sizeof("UnknownLoc");
   state->attributes[attrHandle.id].data = (uint8_t *)malloc(len);
   state->attributes[attrHandle.id].length = snprintf(
@@ -273,10 +283,10 @@ mlirBytecodeCreateBuiltinUnknownLoc(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeCreateBuiltinStringAttr(void *callerState,
+mlirBytecodeCreateBuiltinStringAttr(void *context,
                                     MlirBytecodeAttrHandle attrHandle,
                                     MlirBytecodeBytesRef str) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   int len = str.length + 3;
   state->attributes[attrHandle.id].data = (uint8_t *)malloc(len);
   state->attributes[attrHandle.id].length =
@@ -288,11 +298,11 @@ mlirBytecodeCreateBuiltinStringAttr(void *callerState,
 }
 
 MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttrWithType(
-    void *callerState, MlirBytecodeAttrHandle bcAttrHandle,
+    void *context, MlirBytecodeAttrHandle bcAttrHandle,
     MlirBytecodeBytesRef str, MlirBytecodeTypeHandle type) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
 
-  MlirMutableBytesRef typestr = getType(callerState, type);
+  MlirMutableBytesRef typestr = getType(context, type);
   if (typestr.data == 0)
     return mlirBytecodeFailure();
   int len = str.length + 30;
@@ -306,10 +316,10 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinStringAttrWithType(
 }
 
 MlirBytecodeStatus
-mlirBytecodeCreateBuiltinDictionaryAttr(void *callerState,
+mlirBytecodeCreateBuiltinDictionaryAttr(void *context,
                                         MlirBytecodeAttrHandle attrHandle,
                                         MlirDictionaryHandleIterator *range) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   int kMax = 200;
   state->attributes[attrHandle.id].data = (uint8_t *)malloc(kMax);
   int len = 0;
@@ -318,12 +328,12 @@ mlirBytecodeCreateBuiltinDictionaryAttr(void *callerState,
                   kMax - len, "{");
   MlirBytecodeAttrHandle name;
   MlirBytecodeAttrHandle value;
-  while (mlirBytecodeSucceeded(mlirBytecodeGetNextDictionaryHandles(
-      callerState, range, &name, &value))) {
-    MlirBytecodeStatus ret = mlirBytecodeParseAttribute(callerState, name);
+  while (mlirBytecodeSucceeded(
+      mlirBytecodeGetNextDictionaryHandles(context, range, &name, &value))) {
+    MlirBytecodeStatus ret = mlirBytecodeParseAttribute(context, name);
     if (!mlirBytecodeSucceeded(ret))
       return ret;
-    ret = mlirBytecodeParseAttribute(callerState, value);
+    ret = mlirBytecodeParseAttribute(context, value);
     if (!mlirBytecodeSucceeded(ret))
       return ret;
     MlirMutableBytesRef nameStr = state->attributes[name.id];
@@ -341,9 +351,9 @@ mlirBytecodeCreateBuiltinDictionaryAttr(void *callerState,
 }
 
 MlirBytecodeStatus mlirBytecodeCreateBuiltinIntegerAttr(
-    void *callerState, MlirBytecodeAttrHandle attrHandle,
+    void *context, MlirBytecodeAttrHandle attrHandle,
     MlirBytecodeTypeHandle typeHandle, uint64_t value) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   char kMax = 30;
   state->attributes[attrHandle.id].data = (uint8_t *)malloc(kMax);
   state->attributes[attrHandle.id].length = snprintf(
@@ -356,20 +366,20 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinIntegerAttr(
 }
 
 MlirBytecodeStatus
-mlirBytecodeCreateBuiltinTypeAttr(void *callerState,
+mlirBytecodeCreateBuiltinTypeAttr(void *context,
                                   MlirBytecodeAttrHandle bcAttrHandle,
                                   MlirBytecodeTypeHandle value) {
-  ParsingState *state = callerState;
-  state->attributes[bcAttrHandle.id] = getType(callerState, value);
+  ParsingState *state = context;
+  state->attributes[bcAttrHandle.id] = getType(context, value);
 
   mlirBytecodeEmitDebug("%s", state->attributes[bcAttrHandle.id].data);
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus
-mlirBytecodeCreateBuiltinFloat32Type(void *callerState,
+mlirBytecodeCreateBuiltinFloat32Type(void *context,
                                      MlirBytecodeTypeHandle typeHandle) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   int len = sizeof("f32");
   state->types[typeHandle.id].data = (uint8_t *)malloc(len);
   state->types[typeHandle.id].length =
@@ -380,9 +390,9 @@ mlirBytecodeCreateBuiltinFloat32Type(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeCreateBuiltinIndexType(void *callerState,
+mlirBytecodeCreateBuiltinIndexType(void *context,
                                    MlirBytecodeTypeHandle typeHandle) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   int len = sizeof("index");
   state->types[typeHandle.id].data = (uint8_t *)malloc(len);
   state->types[typeHandle.id].length =
@@ -393,9 +403,9 @@ mlirBytecodeCreateBuiltinIndexType(void *callerState,
 }
 
 MlirBytecodeStatus mlirBytecodeCreateBuiltinIntegerType(
-    void *callerState, MlirBytecodeTypeHandle typeHandle,
+    void *context, MlirBytecodeTypeHandle typeHandle,
     MlirBuiltinSignednessSemantics signedness, int width) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   int len = ceil(log10(width)) + 4;
   state->types[typeHandle.id].data = (uint8_t *)malloc(len);
   int i = 0;
@@ -414,9 +424,9 @@ MlirBytecodeStatus mlirBytecodeCreateBuiltinIntegerType(
 }
 
 MlirBytecodeStatus
-mlirBytecodeCreateBuiltinFunctionType(void *callerState,
+mlirBytecodeCreateBuiltinFunctionType(void *context,
                                       MlirBytecodeTypeHandle typeHandle) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   if (!state->types)
     return mlirBytecodeUnhandled();
   if (state->types[typeHandle.id].data)
@@ -431,9 +441,9 @@ mlirBytecodeCreateBuiltinFunctionType(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeCreateBuiltinRankedTensorType(void *callerState,
+mlirBytecodeCreateBuiltinRankedTensorType(void *context,
                                           MlirBytecodeTypeHandle typeHandle) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   if (!state->types)
     return mlirBytecodeUnhandled();
   if (state->types[typeHandle.id].data)
@@ -450,12 +460,12 @@ mlirBytecodeCreateBuiltinRankedTensorType(void *callerState,
 // ----
 
 MlirBytecodeStatus mlirBytecodeQueryBuiltinIntegerTypeWidth(
-    void *callerState, MlirBytecodeTypeHandle typeHandle, unsigned *width) {
-  ParsingState *state = callerState;
+    void *context, MlirBytecodeTypeHandle typeHandle, unsigned *width) {
+  ParsingState *state = context;
   if (!state->types)
     return mlirBytecodeUnhandled();
 
-  MlirBytecodeStatus ret = mlirBytecodeParseType(callerState, typeHandle);
+  MlirBytecodeStatus ret = mlirBytecodeParseType(context, typeHandle);
   if (!mlirBytecodeSucceeded(ret))
     return ret;
   MlirMutableBytesRef type = state->types[typeHandle.id];
@@ -479,9 +489,9 @@ MlirBytecodeStatus mlirBytecodeQueryBuiltinIntegerTypeWidth(
 
 // ----
 
-static MlirBytecodeStatus mlirBytecodeAttributesPush(void *callerState,
+static MlirBytecodeStatus mlirBytecodeAttributesPush(void *context,
                                                      MlirBytecodeSize total) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   // Note: this currently assumes that number of state->attributes don't change.
   if (state->attributes) {
     free(state->attributes);
@@ -497,20 +507,20 @@ static MlirBytecodeStatus mlirBytecodeAttributesPush(void *callerState,
 }
 
 static MlirBytecodeStatus
-mlirBytecodeAssociateAttributeRange(void *callerState,
+mlirBytecodeAssociateAttributeRange(void *context,
                                     MlirBytecodeAttrHandle attrHandle,
                                     MlirBytecodeDialectHandle dialectHandle,
                                     MlirBytecodeBytesRef str, bool hasCustom) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   state->attributeRange[attrHandle.id].bytes = str;
   state->attributeRange[attrHandle.id].hasCustom = hasCustom;
   state->attributeRange[attrHandle.id].dialectHandle = dialectHandle;
   return mlirBytecodeSuccess();
 }
 
-static MlirBytecodeStatus mlirBytecodeTypesPush(void *callerState,
+static MlirBytecodeStatus mlirBytecodeTypesPush(void *context,
                                                 MlirBytecodeSize total) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   if (state->types) {
     free(state->types);
   }
@@ -523,11 +533,10 @@ static MlirBytecodeStatus mlirBytecodeTypesPush(void *callerState,
 }
 
 static MlirBytecodeStatus
-mlirBytecodeAssociateTypeRange(void *callerState,
-                               MlirBytecodeTypeHandle typeHandle,
+mlirBytecodeAssociateTypeRange(void *context, MlirBytecodeTypeHandle typeHandle,
                                MlirBytecodeDialectHandle dialectHandle,
                                MlirBytecodeBytesRef str, bool hasCustom) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   state->typeRange[typeHandle.id].bytes = str;
   state->typeRange[typeHandle.id].hasCustom = hasCustom;
   state->typeRange[typeHandle.id].dialectHandle = dialectHandle;
@@ -537,10 +546,10 @@ mlirBytecodeAssociateTypeRange(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeDialectOpCallBack(void *callerState, MlirBytecodeOpHandle opHdl,
+mlirBytecodeDialectOpCallBack(void *context, MlirBytecodeOpHandle opHdl,
                               MlirBytecodeDialectHandle dialectHandle,
                               MlirBytecodeStringHandle stringHdl) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   mlirBytecodeEmitDebug("\t\tdialect[%d] :: op[%d] = %d", (int)dialectHandle.id,
                         (int)opHdl.id, (int)stringHdl.id);
   const int total = 100;
@@ -557,9 +566,9 @@ mlirBytecodeDialectOpCallBack(void *callerState, MlirBytecodeOpHandle opHdl,
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeDialectsPush(void *callerState,
+MlirBytecodeStatus mlirBytecodeDialectsPush(void *context,
                                             MlirBytecodeSize total) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   if (state->dialectStr) {
     free(state->dialectStr);
   }
@@ -569,11 +578,11 @@ MlirBytecodeStatus mlirBytecodeDialectsPush(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeDialectCallBack(void *callerState,
+mlirBytecodeDialectCallBack(void *context,
                             MlirBytecodeDialectHandle dialectHandle,
                             MlirBytecodeStringHandle stringHdl) {
-  ParsingState *state = callerState;
-  MlirBytecodeBytesRef dialect = getString(callerState, stringHdl);
+  ParsingState *state = context;
+  MlirBytecodeBytesRef dialect = getString(context, stringHdl);
   mlirBytecodeEmitDebug("\t\tdialect[%d] = %s", (int)dialectHandle.id,
                         dialect.data);
 
@@ -589,9 +598,9 @@ mlirBytecodeDialectCallBack(void *callerState,
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeStringsPush(void *callerState,
+MlirBytecodeStatus mlirBytecodeStringsPush(void *context,
                                            MlirBytecodeSize numStrings) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   if (state->strings) {
     free(state->strings);
   }
@@ -602,10 +611,9 @@ MlirBytecodeStatus mlirBytecodeStringsPush(void *callerState,
   return mlirBytecodeSuccess();
 }
 MlirBytecodeStatus
-mlirBytecodeAssociateStringRange(void *callerState,
-                                 MlirBytecodeStringHandle hdl,
+mlirBytecodeAssociateStringRange(void *context, MlirBytecodeStringHandle hdl,
                                  MlirBytecodeBytesRef bytes) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   state->strings[hdl.id] = bytes;
   return mlirBytecodeSuccess();
 }
@@ -621,10 +629,10 @@ static bool hasAttrDict(MlirBytecodeAttrHandle attr) {
 MlirBytecodeOperationState states[MLIRBC_IR_STACK_MAX_DEPTH + 1];
 int stateDepth;
 
-void mlirBytecodeIRSectionEnter(void *callerState, void *retBlock) {}
+void mlirBytecodeIRSectionEnter(void *context, void *retBlock) {}
 
 MlirBytecodeStatus mlirBytecodeOperationStatePush(
-    void *callerState, MlirBytecodeOpHandle name, MlirBytecodeLocHandle loc,
+    void *context, MlirBytecodeOpHandle name, MlirBytecodeLocHandle loc,
     MlirBytecodeOperationStateHandle *opStateHandle) {
   MlirBytecodeOperationState *opState = &states[stateDepth++];
   mlirBytecodeEmitDebug("operation state push [depth = %d]", stateDepth);
@@ -642,10 +650,10 @@ MlirBytecodeStatus mlirBytecodeOperationStatePush(
 }
 
 MlirBytecodeStatus
-mlirBytecodeOperationBlockPush(void *callerState,
+mlirBytecodeOperationBlockPush(void *context,
                                MlirBytecodeOperationHandle opHandle,
                                MlirBytecodeHandlesRef typeAndLocs) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   bool first = true;
   printf("%*cblock", state->indentSize, '_');
   state->indentSize += 2;
@@ -659,10 +667,10 @@ mlirBytecodeOperationBlockPush(void *callerState,
     // Note: block args locs push the print form too much.
     if (first)
       printf("%%%d : %s", state->ssaIdStack[state->depth]++,
-             getType(callerState, type).data);
+             getType(context, type).data);
     else
       printf(", %%%d : %s", state->ssaIdStack[state->depth]++,
-             getType(callerState, type).data);
+             getType(context, type).data);
     first = false;
   }
 
@@ -674,18 +682,18 @@ mlirBytecodeOperationBlockPush(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeOperationBlockPop(void *callerState,
+mlirBytecodeOperationBlockPop(void *context,
                               MlirBytecodeOperationHandle opHandle) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   state->indentSize -= 2;
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus
-mlirBytecodeOperationRegionPush(void *callerState,
+mlirBytecodeOperationRegionPush(void *context,
                                 MlirBytecodeOperationHandle opHandle,
                                 size_t numBlocks, size_t numValues) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   MlirBytecodeOperationState *opState = opHandle;
   if (state->depth + 1 == MAX_DEPTH)
     return mlirBytecodeUnhandled();
@@ -704,29 +712,29 @@ mlirBytecodeOperationRegionPush(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeOperationRegionPop(void *callerState,
+mlirBytecodeOperationRegionPop(void *context,
                                MlirBytecodeOperationStateHandle opStateHandle) {
-  ParsingState *state = callerState;
+  ParsingState *state = context;
   --state->depth;
   state->indentSize -= 2;
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
-    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeAttrHandle attrs) {
   MlirBytecodeOperationState *opState = opStateHandle;
   opState->attrDict = attrs;
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus printOperationPrefix(void *callerState,
+MlirBytecodeStatus printOperationPrefix(void *context,
                                         MlirBytecodeOperationState *opState,
                                         MlirBytecodeHandlesRef retTypes) {
-  ParsingState *state = callerState;
-  MlirBytecodeOpRef opRef = mlirBytecodeGetOpName(callerState, opState->name);
-  MlirBytecodeBytesRef opName = getString(callerState, opRef.op);
-  MlirBytecodeBytesRef dialectName = getString(callerState, opRef.dialect);
+  ParsingState *state = context;
+  MlirBytecodeOpRef opRef = mlirBytecodeGetOpName(context, opState->name);
+  MlirBytecodeBytesRef opName = getString(context, opRef.op);
+  MlirBytecodeBytesRef dialectName = getString(context, opRef.dialect);
 
   bool first = true;
   printf("%*c", state->indentSize, ' ');
@@ -738,7 +746,7 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
 
     printf("%%%d", state->ssaIdStack[state->depth]++);
     MlirBytecodeStatus ret =
-        mlirBytecodeParseType(callerState, retTypes.handles[i]);
+        mlirBytecodeParseType(context, retTypes.handles[i]);
     if (mlirBytecodeSucceeded(ret)) {
       printf(":%.*s", (int)state->types[retTypes.handles[i].id].length,
              state->types[retTypes.handles[i].id].data);
@@ -756,7 +764,7 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
 
   if (!hasAttrDict(opState->attrDict)) {
     MlirBytecodeStatus ret =
-        mlirBytecodeParseAttribute(callerState, opState->attrDict);
+        mlirBytecodeParseAttribute(context, opState->attrDict);
     if (mlirBytecodeFailed(ret)) {
       return ret;
     } else if (mlirBytecodeSucceeded(ret)) {
@@ -771,20 +779,20 @@ MlirBytecodeStatus printOperationPrefix(void *callerState,
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
-    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeHandlesRef ref) {
   MlirBytecodeOperationState *opState = opStateHandle;
   opState->hasResults = true;
-  return printOperationPrefix(callerState, opState, ref);
+  return printOperationPrefix(context, opState, ref);
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
-    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeHandlesRef ref) {
   MlirBytecodeOperationState *opState = opStateHandle;
   if (!opState->hasResults)
     if (!mlirBytecodeSucceeded(printOperationPrefix(
-            callerState, opState,
+            context, opState,
             (MlirBytecodeHandlesRef){.handles = NULL, .length = 0})))
       return mlirBytecodeSuccess();
   opState->hasOperands = true;
@@ -804,13 +812,13 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
-    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
-    uint64_t n, bool isIsolatedFromAbove) {
+    void *context, MlirBytecodeOperationStateHandle opStateHandle, uint64_t n,
+    bool isIsolatedFromAbove) {
   MlirBytecodeOperationState *opState = opStateHandle;
   mlirBytecodeEmitDebug("numRegions = %d", (int)n);
   if (!opState->hasResults && !opState->hasOperands)
     if (!mlirBytecodeSucceeded(printOperationPrefix(
-            callerState, opState,
+            context, opState,
             (MlirBytecodeHandlesRef){.handles = NULL, .length = 0})))
       return mlirBytecodeSuccess();
   opState->hasRegions = true;
@@ -820,13 +828,13 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
-    void *callerState, MlirBytecodeOperationStateHandle opStateHandle,
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeSizesRef ref) {
   MlirBytecodeOperationState *opState = opStateHandle;
   uint64_t numSuccessors = ref.length;
   if (!opState->hasResults && !opState->hasOperands && !opState->hasRegions)
     if (!mlirBytecodeSucceeded(printOperationPrefix(
-            callerState, opState,
+            context, opState,
             (MlirBytecodeHandlesRef){.handles = NULL, .length = 0})))
       return mlirBytecodeSuccess();
   if (numSuccessors > 0) {
@@ -839,7 +847,7 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
 }
 
 MlirBytecodeStatus
-mlirBytecodeOperationStatePop(void *callerState,
+mlirBytecodeOperationStatePop(void *context,
                               MlirBytecodeOperationStateHandle opStateHandle,
                               MlirBytecodeOperationHandle *opHandle) {
   MlirBytecodeOperationState *opState = opStateHandle;
@@ -848,7 +856,7 @@ mlirBytecodeOperationStatePop(void *callerState,
   if (!opState->hasResults && !opState->hasOperands && !opState->hasRegions &&
       !opState->hasSuccessors)
     if (!mlirBytecodeSucceeded(printOperationPrefix(
-            callerState, opState,
+            context, opState,
             (MlirBytecodeHandlesRef){.handles = NULL, .length = 0})))
       return mlirBytecodeSuccess();
   if (!opState->hasRegions)
@@ -858,45 +866,42 @@ mlirBytecodeOperationStatePop(void *callerState,
 }
 
 MlirBytecodeStatus
-mlirBytecodeResourceSectionEnter(void *callerState,
+mlirBytecodeResourceSectionEnter(void *context,
                                  MlirBytecodeSize numExternalResourceGroups) {
   printf("-- Number of resource groups: %d\n", (int)numExternalResourceGroups);
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus
-mlirBytecodeResourceGroupEnter(void *callerState,
-                               MlirBytecodeStringHandle groupKey,
+mlirBytecodeResourceGroupEnter(void *context, MlirBytecodeStringHandle groupKey,
                                MlirBytecodeSize numResources) {
-  printf("\tgroup '%s'\n", getString(callerState, groupKey).data);
+  printf("\tgroup '%s'\n", getString(context, groupKey).data);
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
-    void *callerState, MlirBytecodeStringHandle groupKey,
+    void *context, MlirBytecodeStringHandle groupKey,
     MlirBytecodeStringHandle resourceKey, MlirBytecodeBytesRef blob) {
   printf("\t\tblob size(resource %s. %s) = %" PRIu64 "\n",
-         getString(callerState, groupKey).data,
-         getString(callerState, resourceKey).data, blob.length);
+         getString(context, groupKey).data,
+         getString(context, resourceKey).data, blob.length);
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
-    void *callerState, MlirBytecodeStringHandle groupKey,
+    void *context, MlirBytecodeStringHandle groupKey,
     MlirBytecodeStringHandle resourceKey, uint8_t boolResource) {
-  printf("\t\tbool resource %s. %s = %d\n",
-         getString(callerState, groupKey).data,
-         getString(callerState, resourceKey).data, boolResource);
+  printf("\t\tbool resource %s. %s = %d\n", getString(context, groupKey).data,
+         getString(context, resourceKey).data, boolResource);
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeResourceStringCallBack(
-    void *callerState, MlirBytecodeStringHandle groupKey,
+    void *context, MlirBytecodeStringHandle groupKey,
     MlirBytecodeStringHandle resourceKey, MlirBytecodeStringHandle strHandle) {
-  printf("\t\tstring resource %s. %s = %s\n",
-         getString(callerState, groupKey).data,
-         getString(callerState, resourceKey).data,
-         getString(callerState, strHandle).data);
+  printf("\t\tstring resource %s. %s = %s\n", getString(context, groupKey).data,
+         getString(context, resourceKey).data,
+         getString(context, strHandle).data);
   return mlirBytecodeSuccess();
 }
 
