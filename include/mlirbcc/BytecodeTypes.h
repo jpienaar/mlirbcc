@@ -46,7 +46,7 @@ typedef MlirBytecodeHandle MlirBytecodeResourceHandle;
 typedef MlirBytecodeHandle MlirBytecodeStringHandle;
 typedef MlirBytecodeHandle MlirBytecodeTypeHandle;
 
-// Reference to section of memory.
+/// Reference to section of memory.
 // Does not own the underlying string. This is equivalent to llvm::StringRef.
 struct MlirBytecodeBytesRef {
   // Pointer to the start memory address.
