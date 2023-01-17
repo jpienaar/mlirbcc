@@ -170,9 +170,8 @@ struct ValueScope {
 };
 
 struct ParsingState {
-  ParsingState(Location fileLoc,
-               FallbackAsmResourceMap *fallbackResourceMap = nullptr)
-      : fallbackResourceMap(fallbackResourceMap), fileLoc(fileLoc),
+  ParsingState(Location fileLoc, const ParserConfig &config)
+      : config(config), fileLoc(fileLoc),
         pendingOperationState(fileLoc, "builtin.unrealized_conversion_cast"),
         // Use the builtin unrealized conversion cast operation to represent
         // forward references to values that aren't yet defined.
@@ -247,9 +246,8 @@ struct ParsingState {
   std::vector<BytecodeType> types;
   std::vector<StringRef> strings;
 
-  /// Resource parsing.
-  DenseMap<StringRef, std::unique_ptr<AsmResourceParser>> resourceParsers;
-  FallbackAsmResourceMap *fallbackResourceMap;
+  /// The configuration of the parser.
+  const ParserConfig &config;
 
   /// Location to use for reporting errors.
   Location fileLoc;
@@ -450,6 +448,7 @@ MlirBytecodeDialectBytecodeReader::readAPIntWithKnownWidth(unsigned bitWidth) {
   const uint64_t bitsPerWord = sizeof(uint64_t) * CHAR_BIT;
   uint64_t numWords = ((uint64_t)bitWidth + bitsPerWord - 1) / bitsPerWord;
   APInt retVal(bitWidth, llvm::makeArrayRef(result.U.data, numWords));
+  free(result.U.data);
   return retVal;
 }
 
@@ -723,8 +722,7 @@ mlirBytecodeOperationRegionPop(void *context,
 
   if (state.regionStack.size() == 1) {
     // Verify that the parsed operations are valid.
-    if (
-        // config.shouldVerifyAfterParse() &&
+    if (state.config.shouldVerifyAfterParse() &&
         failed(verify(*state.moduleOp)))
       return mlirBytecodeFailure();
 
@@ -981,6 +979,27 @@ mlirBytecodeAssociateStringRange(void *context, MlirBytecodeStringHandle handle,
   return mlirBytecodeUnhandled();
 }
 
+//===----------------------------------------------------------------------===//
+// Entry Points
+//===----------------------------------------------------------------------===//
+
+MlirBytecodeStatus readBytecodeFile(llvm::MemoryBufferRef buffer, Block *block,
+                                    const ParserConfig &config) {
+  Location sourceFileLoc =
+      FileLineColLoc::get(config.getContext(), buffer.getBufferIdentifier(),
+                          /*line=*/0, /*column=*/0);
+  MlirBytecodeBytesRef ref = {.data = (const uint8_t *)buffer.getBufferStart(),
+                              .length = buffer.getBufferSize()};
+  MlirBytecodeStream stream = mlirBytecodeStreamCreate(ref);
+  MlirBytecodeParserState parserState =
+      mlirBytecodePopulateParserState(&stream, ref, nullptr, 0);
+  ParsingState state(sourceFileLoc, config);
+  if (mlirBytecodeParserStateEmpty(&parserState))
+    return mlirBytecodeSuccess();
+
+  return mlirBytecodeParse(&state, &parserState, block);
+}
+
 int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr, "usage: %s file.mlirbc\n", argv[0]);
@@ -1003,26 +1022,14 @@ int main(int argc, char **argv) {
   auto idx = sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
   const llvm::MemoryBuffer *buffer = sourceMgr.getMemoryBuffer(idx);
 
-  MlirBytecodeBytesRef ref = {.data = (const uint8_t *)buffer->getBufferStart(),
-                              .length = buffer->getBufferSize()};
   DialectRegistry registry;
   registry.insert<func::FuncDialect>();
   MLIRContext context(registry);
-
-  auto fileLoc = UnknownLoc::get(&context);
-  MlirBytecodeStream stream = {
-      .start = ref.data, .pos = ref.data, .end = ref.data};
-
-  MlirBytecodeParserState parserState =
-      mlirBytecodePopulateParserState(&stream, ref, nullptr, 0);
-  ParsingState state(fileLoc);
-  auto moduleOp = ModuleOp::create(fileLoc);
-  if (!mlirBytecodeParserStateEmpty(&parserState)) {
-    if (mlirBytecodeFailed(
-            mlirBytecodeParse(&state, &parserState, moduleOp.getBody())))
-      return mlirBytecodeEmitError(&state, "MlirBytecodeFailed to parse file"),
-             1;
-  }
+  auto moduleOp = ModuleOp::create(UnknownLoc::get(&context));
+  ParserConfig config(&context);
+  if (!mlirBytecodeSucceeded(
+          ::readBytecodeFile(*buffer, moduleOp.getBody(), config)))
+    return 1;
   moduleOp.dump();
 
   return 0;
