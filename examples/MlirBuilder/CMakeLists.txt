@@ -1,4 +1,10 @@
 add_executable(MlirBytecodeBuilder
   Builder.cpp
 )
-target_link_libraries(MlirBytecodeBuilder MLIRAsmParser MLIRIR LLVMSupport MLIRSupport)
+target_link_libraries(MlirBytecodeBuilder
+  LLVMSupport
+  MLIRAsmParser
+  MLIRFuncDialect
+  MLIRIR
+  MLIRSupport
+  )
