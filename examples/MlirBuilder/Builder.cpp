@@ -781,8 +781,8 @@ MlirBytecodeStatus mlirBytecodeParseAttribute(void *context,
     return mlirBytecodeSuccess();
   }
 
-  auto asmStr =
-      StringRef((const char *)attr.range.bytes.data, attr.range.bytes.length - 1);
+  auto asmStr = StringRef((const char *)attr.range.bytes.data,
+                          attr.range.bytes.length - 1);
   // Invoke the MLIR assembly parser to parse the entry text.
   size_t numRead = 0;
   attr.value = ::parseAttribute(asmStr, state.getContext(), numRead);
@@ -794,7 +794,7 @@ MlirBytecodeStatus mlirBytecodeParseAttribute(void *context,
         asmStr.drop_front(numRead).str().c_str());
   }
 
-  return attr.value ? mlirBytecodeSuccess() :  mlirBytecodeFailure();
+  return attr.value ? mlirBytecodeSuccess() : mlirBytecodeFailure();
 }
 
 MlirBytecodeStatus mlirBytecodeParseType(void *context,
@@ -834,8 +834,8 @@ MlirBytecodeStatus mlirBytecodeParseType(void *context,
     return mlirBytecodeSuccess();
   }
 
-  auto asmStr =
-      StringRef((const char *)type.range.bytes.data, type.range.bytes.length - 1);
+  auto asmStr = StringRef((const char *)type.range.bytes.data,
+                          type.range.bytes.length - 1);
   // Invoke the MLIR assembly parser to parse the entry text.
   size_t numRead = 0;
   type.value = ::parseType(asmStr, state.getContext(), numRead);
@@ -846,7 +846,7 @@ MlirBytecodeStatus mlirBytecodeParseType(void *context,
         asmStr.drop_front(numRead).str().c_str());
   }
 
-  return type.value ? mlirBytecodeSuccess() :  mlirBytecodeFailure();
+  return type.value ? mlirBytecodeSuccess() : mlirBytecodeFailure();
 }
 
 MlirBytecodeStatus mlirBytecodeAssociateAttributeRange(
@@ -924,8 +924,8 @@ MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
 
   AsmResourceParser *handler = state.config.getResourceParser(*group);
   if (!handler) {
-      emitWarning(state.fileLoc) << "ignoring unknown external resources for '" << *group
-                           << "'";
+    emitWarning(state.fileLoc)
+        << "ignoring unknown external resources for '" << *group << "'";
   }
   return mlirBytecodeUnhandled();
 }
@@ -1022,7 +1022,8 @@ int main(int argc, char **argv) {
       llvm::cl::Positional, llvm::cl::desc("<input file>"), llvm::cl::Required);
   static llvm::cl::opt<bool> allowUnregisteredDialects(
       "allow-unregistered-dialect",
-      llvm::cl::desc("Allow operation with no registered dialects"), llvm::cl::init(false));
+      llvm::cl::desc("Allow operation with no registered dialects"),
+      llvm::cl::init(false));
 
   llvm::InitLLVM y(argc, argv);
   registerMLIRContextCLOptions();
