@@ -20,12 +20,14 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBufferRef.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/SourceMgr.h"
 #include <optional>
 #include <stack>
+#include <string>
 
 // Parsing inc configuration.
 typedef mlir::OperationState MlirBytecodeOperationState;
@@ -381,17 +383,17 @@ struct MlirBytecodeDialectBytecodeReader : public mlir::DialectBytecodeReader {
             (MlirBytecodeDialectReader){.context = &state, .stream = &stream}),
         state(state){};
 
-  InFlightDiagnostic emitError(const Twine &msg = {}) override;
-  LogicalResult readAttribute(Attribute &result) override;
-  LogicalResult readType(Type &result) override;
-  LogicalResult readVarInt(uint64_t &result) override;
-  LogicalResult readSignedVarInt(int64_t &result) override;
-  FailureOr<APInt> readAPIntWithKnownWidth(unsigned bitWidth) override;
+  InFlightDiagnostic emitError(const Twine &msg = {}) final;
+  LogicalResult readAttribute(Attribute &result) final;
+  LogicalResult readType(Type &result) final;
+  LogicalResult readVarInt(uint64_t &result) final;
+  LogicalResult readSignedVarInt(int64_t &result) final;
+  FailureOr<APInt> readAPIntWithKnownWidth(unsigned bitWidth) final;
   FailureOr<APFloat>
-  readAPFloatWithKnownSemantics(const llvm::fltSemantics &semantics) override;
-  LogicalResult readString(StringRef &result) override;
-  LogicalResult readBlob(ArrayRef<char> &result) override;
-  FailureOr<AsmDialectResourceHandle> readResourceHandle() override;
+  readAPFloatWithKnownSemantics(const llvm::fltSemantics &semantics) final;
+  LogicalResult readString(StringRef &result) final;
+  LogicalResult readBlob(ArrayRef<char> &result) final;
+  FailureOr<AsmDialectResourceHandle> readResourceHandle() final;
 
   MlirBytecodeDialectReader reader;
   ParsingState &state;
@@ -447,7 +449,7 @@ MlirBytecodeDialectBytecodeReader::readAPIntWithKnownWidth(unsigned bitWidth) {
 
   const uint64_t bitsPerWord = sizeof(uint64_t) * CHAR_BIT;
   uint64_t numWords = ((uint64_t)bitWidth + bitsPerWord - 1) / bitsPerWord;
-  APInt retVal(bitWidth, llvm::makeArrayRef(result.U.data, numWords));
+  APInt retVal(bitWidth, ArrayRef(result.U.data, numWords));
   free(result.U.data);
   return retVal;
 }
@@ -500,6 +502,8 @@ void mlirBytecodeIRSectionEnter(void *context, void *retBlock) {
   state.regionStack.back().curBlocks.push_back(state.moduleOp->getBody());
   state.regionStack.back().curBlock =
       state.regionStack.back().curRegion->begin();
+  state.valueScopes.emplace_back();
+  state.valueScopes.back().push(state.regionStack.back());
 }
 
 MlirBytecodeStatus
@@ -507,7 +511,6 @@ mlirBytecodeOperationStatePush(void *context, MlirBytecodeOpHandle opHandle,
                                MlirBytecodeLocHandle locHandle,
                                MlirBytecodeOperationStateHandle *opState) {
   ParsingState &state = *(ParsingState *)context;
-  mlirBytecodeEmitDebug("operation state push");
   LocationAttr locAttr =
       dyn_cast_if_present<LocationAttr>(state.attribute(locHandle));
   if (!locAttr)
@@ -647,6 +650,10 @@ mlirBytecodeOperationRegionPush(void *context,
                                 size_t numBlocks, size_t numValues) {
   ParsingState &state = *(ParsingState *)context;
 
+  // If the region is empty, there is nothing else to do.
+  if (numBlocks == 0)
+    return mlirBytecodeFailure();
+
   // Create the blocks within this region. We do this before processing so that
   // we can rely on the blocks existing when creating operations.
   auto &readState = state.regionStack.back();
@@ -656,13 +663,14 @@ mlirBytecodeOperationRegionPush(void *context,
     readState.curBlocks.push_back(new Block());
     readState.curRegion->push_back(readState.curBlocks.back());
   }
-  readState.curBlock = readState.curRegion->begin();
   readState.numValues = numValues;
 
   // Prepare the current value scope for this region.
   auto &valueScopes = state.valueScopes;
   valueScopes.back().push(readState);
 
+  // Parse the entry block of the region.
+  readState.curBlock = readState.curRegion->begin();
   return mlirBytecodeSuccess();
 }
 
@@ -715,7 +723,7 @@ mlirBytecodeOperationRegionPop(void *context,
 
   // Pop barrier value scope for isolated from above op.
   if (readState.curRegion == readState.endRegion) {
-    if (state.isIsolatedFromAbove)
+    if (readState.isIsolatedFromAbove)
       valueScopes.pop_back();
     state.regionStack.pop_back();
   }
@@ -738,8 +746,6 @@ mlirBytecodeOperationRegionPop(void *context,
 
 MlirBytecodeStatus mlirBytecodeParseAttribute(void *context,
                                               MlirBytecodeAttrHandle handle) {
-  mlirBytecodeEmitDebug("processing attribute %d", (int)handle.id);
-
   ParsingState &state = *(ParsingState *)context;
   if (handle.id >= state.attributes.size())
     return mlirBytecodeEmitError(context,
@@ -774,8 +780,9 @@ MlirBytecodeStatus mlirBytecodeParseAttribute(void *context,
       return mlirBytecodeFailure();
     return mlirBytecodeSuccess();
   }
+
   auto asmStr =
-      StringRef((const char *)attr.range.bytes.data, attr.range.bytes.length);
+      StringRef((const char *)attr.range.bytes.data, attr.range.bytes.length - 1);
   // Invoke the MLIR assembly parser to parse the entry text.
   size_t numRead = 0;
   attr.value = ::parseAttribute(asmStr, state.getContext(), numRead);
@@ -786,9 +793,8 @@ MlirBytecodeStatus mlirBytecodeParseAttribute(void *context,
         "trailing characters found after Attribute assembly format: %s",
         asmStr.drop_front(numRead).str().c_str());
   }
-  if (!attr.value)
-    return mlirBytecodeFailure();
-  return mlirBytecodeSuccess();
+
+  return attr.value ? mlirBytecodeSuccess() :  mlirBytecodeFailure();
 }
 
 MlirBytecodeStatus mlirBytecodeParseType(void *context,
@@ -829,7 +835,7 @@ MlirBytecodeStatus mlirBytecodeParseType(void *context,
   }
 
   auto asmStr =
-      StringRef((const char *)type.range.bytes.data, type.range.bytes.length);
+      StringRef((const char *)type.range.bytes.data, type.range.bytes.length - 1);
   // Invoke the MLIR assembly parser to parse the entry text.
   size_t numRead = 0;
   type.value = ::parseType(asmStr, state.getContext(), numRead);
@@ -839,9 +845,8 @@ MlirBytecodeStatus mlirBytecodeParseType(void *context,
         context, "trailing characters found after Type assembly format: %s",
         asmStr.drop_front(numRead).str().c_str());
   }
-  if (!type.value)
-    return mlirBytecodeFailure();
-  return mlirBytecodeSuccess();
+
+  return type.value ? mlirBytecodeSuccess() :  mlirBytecodeFailure();
 }
 
 MlirBytecodeStatus mlirBytecodeAssociateAttributeRange(
@@ -850,7 +855,7 @@ MlirBytecodeStatus mlirBytecodeAssociateAttributeRange(
     bool hasCustom) {
   ParsingState &state = *(ParsingState *)context;
   state.attributes[attrHandle.id].range = {
-      .bytes = bytes, .hasCustom = hasCustom, .dialectHandle = dialectHandle};
+      .bytes = bytes, .dialectHandle = dialectHandle, .hasCustom = hasCustom};
   return mlirBytecodeSuccess();
 }
 
@@ -860,7 +865,7 @@ mlirBytecodeAssociateTypeRange(void *context, MlirBytecodeTypeHandle typeHandle,
                                MlirBytecodeBytesRef bytes, bool hasCustom) {
   ParsingState &state = *(ParsingState *)context;
   state.types[typeHandle.id].range = {
-      .bytes = bytes, .hasCustom = hasCustom, .dialectHandle = dialectHandle};
+      .bytes = bytes, .dialectHandle = dialectHandle, .hasCustom = hasCustom};
   return mlirBytecodeSuccess();
 }
 
@@ -900,18 +905,28 @@ mlirBytecodeDialectOpCallBack(void *context, MlirBytecodeOpHandle opHandle,
 MlirBytecodeStatus
 mlirBytecodeResourceSectionEnter(void *context,
                                  MlirBytecodeSize numExternalResourceGroups) {
-  return mlirBytecodeUnhandled();
+  return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus
 mlirBytecodeResourceGroupEnter(void *context, MlirBytecodeStringHandle groupKey,
                                MlirBytecodeSize numResources) {
-  return mlirBytecodeUnhandled();
+  return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
     void *context, MlirBytecodeStringHandle resourceKey,
     MlirBytecodeStringHandle groupKey, MlirBytecodeBytesRef blob) {
+  ParsingState &state = *(ParsingState *)context;
+  FailureOr<StringRef> group = state.string(groupKey);
+  if (failed(group))
+    return mlirBytecodeEmitError(context, "invalid string index");
+
+  AsmResourceParser *handler = state.config.getResourceParser(*group);
+  if (!handler) {
+      emitWarning(state.fileLoc) << "ignoring unknown external resources for '" << *group
+                           << "'";
+  }
   return mlirBytecodeUnhandled();
 }
 
@@ -997,21 +1012,24 @@ MlirBytecodeStatus readBytecodeFile(llvm::MemoryBufferRef buffer, Block *block,
   if (mlirBytecodeParserStateEmpty(&parserState))
     return mlirBytecodeSuccess();
 
-  return mlirBytecodeParse(&state, &parserState, block);
+  MlirBytecodeStatus ret = mlirBytecodeParse(&state, &parserState, block);
+  free(parserState.scratchBase);
+  return ret;
 }
 
 int main(int argc, char **argv) {
-  if (argc < 2) {
-    fprintf(stderr, "usage: %s file.mlirbc\n", argv[0]);
-    return 1;
-  }
-  std::string fileName(argv[1]);
+  static llvm::cl::opt<std::string> inputFilename(
+      llvm::cl::Positional, llvm::cl::desc("<input file>"), llvm::cl::Required);
+  static llvm::cl::opt<bool> allowUnregisteredDialects(
+      "allow-unregistered-dialect",
+      llvm::cl::desc("Allow operation with no registered dialects"), llvm::cl::init(false));
 
   llvm::InitLLVM y(argc, argv);
   registerMLIRContextCLOptions();
+  llvm::cl::ParseCommandLineOptions(argc, argv);
 
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
-      llvm::MemoryBuffer::getFileOrSTDIN(fileName);
+      llvm::MemoryBuffer::getFileOrSTDIN(inputFilename);
   if (!fileOrErr) {
     std::error_code error = fileOrErr.getError();
     fprintf(stderr, "MlirBytecodeFailed to open file '%s': %s", argv[1],
@@ -1025,12 +1043,13 @@ int main(int argc, char **argv) {
   DialectRegistry registry;
   registry.insert<func::FuncDialect>();
   MLIRContext context(registry);
-  auto moduleOp = ModuleOp::create(UnknownLoc::get(&context));
+  context.allowUnregisteredDialects(allowUnregisteredDialects);
+  OwningOpRef<ModuleOp> moduleOp = ModuleOp::create(UnknownLoc::get(&context));
   ParserConfig config(&context);
   if (!mlirBytecodeSucceeded(
-          ::readBytecodeFile(*buffer, moduleOp.getBody(), config)))
+          ::readBytecodeFile(*buffer, moduleOp->getBody(), config)))
     return 1;
-  moduleOp.dump();
+  moduleOp->dump();
 
   return 0;
 }

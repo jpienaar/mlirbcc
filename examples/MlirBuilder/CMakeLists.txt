@@ -8,3 +8,4 @@ target_link_libraries(MlirBytecodeBuilder
   MLIRIR
   MLIRSupport
   )
+llvm_update_compile_flags(MlirBytecodeBuilder)
