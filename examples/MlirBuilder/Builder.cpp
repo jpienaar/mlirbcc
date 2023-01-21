@@ -551,36 +551,42 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
     void *context, MlirBytecodeOperationStateHandle opStateHandle,
-    MlirBytecodeHandlesRef types) {
+    MlirBytecodeSize numResults) {
+  OperationState &opState = *opStateHandle;
+  opState.types.clear();
+  opState.types.reserve(numResults);
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus mlirBytecodeOperationStateAddResultType(
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeTypeHandle type) {
   ParsingState &state = *(ParsingState *)context;
   OperationState &opState = *opStateHandle;
 
-  SmallVector<Type> resultTypes;
-  resultTypes.reserve(types.length);
-  for (uint64_t i = 0, e = types.length; i < e; ++i) {
-    MlirBytecodeAttrHandle typeHandle = types.handles[i];
-    FailureOr<Type> resultType = state.type(typeHandle);
-    if (MLIRBC_UNLIKELY(failed(resultType)))
-      return mlirBytecodeEmitError(context, "invalid result type");
-    resultTypes.push_back(*resultType);
-  }
-  opState.addTypes(resultTypes);
-
+  FailureOr<Type> resultType = state.type(type);
+  if (MLIRBC_UNLIKELY(failed(resultType)))
+    return mlirBytecodeEmitError(context, "invalid result type");
+  opState.types.push_back(*resultType);
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
     void *context, MlirBytecodeOperationStateHandle opStateHandle,
-    MlirBytecodeHandlesRef operands) {
+    MlirBytecodeSize numOperands) {
+  OperationState &opState = *opStateHandle;
+  opState.operands.clear();
+  opState.operands.reserve(numOperands);
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus mlirBytecodeOperationStateAddOperand(
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeValueHandle value) {
   ParsingState &state = *(ParsingState *)context;
   OperationState &opState = *opStateHandle;
 
-  const uint64_t numOperands = operands.length;
-  opState.operands.resize(numOperands);
-  for (int i = 0, e = numOperands; i < e; ++i) {
-    if (!(opState.operands[i] = parseOperand(state, i)))
-      return mlirBytecodeFailure();
-  }
+  opState.operands.push_back(parseOperand(state, value.id));
   return mlirBytecodeSuccess();
 }
 
@@ -598,19 +604,23 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
     void *context, MlirBytecodeOperationStateHandle opStateHandle,
-    MlirBytecodeSizesRef successors) {
+    MlirBytecodeSize numSuccessors) {
+  OperationState &opState = *opStateHandle;
+  opState.successors.clear();
+  opState.successors.reserve(numSuccessors);
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessor(
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeHandle successor) {
   ParsingState &state = *(ParsingState *)context;
   OperationState &opState = *opStateHandle;
 
-  const uint64_t numSuccs = successors.length;
-  RegionReadState &readState = state.regionStack.back();
-
-  opState.successors.resize(numSuccs);
-  for (int i = 0, e = numSuccs; i < e; ++i) {
-    if (MLIRBC_UNLIKELY(successors.sizes[i] >= readState.curBlocks.size()))
-      return mlirBytecodeEmitError(context, "invalid successor index");
-    opState.successors[i] = readState.curBlocks[successors.sizes[i]];
-  }
+  auto &readState = state.regionStack.back();
+  if (MLIRBC_UNLIKELY(successor.id >= readState.curBlocks.size()))
+    return mlirBytecodeEmitError(context, "invalid successor index");
+  opState.successors.push_back(readState.curBlocks[successor.id]);
   return mlirBytecodeSuccess();
 }
 
@@ -648,6 +658,8 @@ MlirBytecodeStatus
 mlirBytecodeOperationRegionPush(void *context,
                                 MlirBytecodeOperationHandle opHandle,
                                 size_t numBlocks, size_t numValues) {
+  mlirBytecodeEmitDebug("region push blocks=%d values=%d", (int)numBlocks,
+                        (int)numValues);
   ParsingState &state = *(ParsingState *)context;
 
   // If the region is empty, there is nothing else to do.
@@ -677,28 +689,26 @@ mlirBytecodeOperationRegionPush(void *context,
 MlirBytecodeStatus
 mlirBytecodeOperationBlockPush(void *context,
                                MlirBytecodeOperationHandle opHandle,
-                               MlirBytecodeHandlesRef typeAndLocs) {
+                               MlirBytecodeSize numArgs) {
   ParsingState &state = *(ParsingState *)context;
+  // TODO: Add method to pre-size numArgs.
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus mlirBytecodeOperationBlockAddArgument(
+    void *context, MlirBytecodeOperationHandle opHandle,
+    MlirBytecodeTypeHandle type, MlirBytecodeLocHandle loc) {
+  ParsingState &state = *(ParsingState *)context;
+  Type t = state.type(type);
+  Attribute locAttr = state.attribute(loc);
+  if (MLIRBC_UNLIKELY(!t))
+    return mlirBytecodeEmitError(context, "invalid type");
+  if (MLIRBC_UNLIKELY(!locAttr))
+    return mlirBytecodeEmitError(context, "invalid location");
+
   auto &readState = state.regionStack.back();
-
-  SmallVector<Type> types;
-  SmallVector<Location> locs;
-  types.reserve(typeAndLocs.length);
-  locs.reserve(typeAndLocs.length);
-  for (uint64_t i = 0; i < typeAndLocs.length; ++i) {
-    MlirBytecodeTypeHandle type = typeAndLocs.handles[2 * i];
-    MlirBytecodeLocHandle loc = typeAndLocs.handles[2 * i + 1];
-    types.push_back(state.type(type));
-    if (MLIRBC_UNLIKELY(!types[i]))
-      return mlirBytecodeEmitError(context, "invalid type");
-    LocationAttr locAttr =
-        dyn_cast_if_present<LocationAttr>(state.attribute(loc));
-    if (MLIRBC_UNLIKELY(!locAttr))
-      return mlirBytecodeEmitError(context, "invalid location");
-    locs.emplace_back(locAttr);
-  }
-
-  readState.curBlock->addArguments(types, locs);
+  defineValues(state,
+               readState.curBlock->addArgument(t, cast<LocationAttr>(locAttr)));
   return mlirBytecodeSuccess();
 }
 
@@ -1007,13 +1017,12 @@ MlirBytecodeStatus readBytecodeFile(llvm::MemoryBufferRef buffer, Block *block,
                               .length = buffer.getBufferSize()};
   MlirBytecodeStream stream = mlirBytecodeStreamCreate(ref);
   MlirBytecodeParserState parserState =
-      mlirBytecodePopulateParserState(&stream, ref, nullptr, 0);
+      mlirBytecodePopulateParserState(&stream, ref);
   ParsingState state(sourceFileLoc, config);
   if (mlirBytecodeParserStateEmpty(&parserState))
     return mlirBytecodeSuccess();
 
   MlirBytecodeStatus ret = mlirBytecodeParse(&state, &parserState, block);
-  free(parserState.scratchBase);
   return ret;
 }
 
@@ -1044,6 +1053,7 @@ int main(int argc, char **argv) {
   DialectRegistry registry;
   registry.insert<func::FuncDialect>();
   MLIRContext context(registry);
+  context.printOpOnDiagnostic(true);
   context.allowUnregisteredDialects(allowUnregisteredDialects);
   OwningOpRef<ModuleOp> moduleOp = ModuleOp::create(UnknownLoc::get(&context));
   ParserConfig config(&context);

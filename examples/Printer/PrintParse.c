@@ -49,6 +49,7 @@ struct MlirBytecodeOperationState {
   bool hasRegions;
   bool hasResults;
   bool hasSuccessors;
+  int numArgsRemaining;
 };
 
 typedef struct MlirMutableBytesRef MlirMutableBytesRef;
@@ -125,6 +126,12 @@ MlirBytecodeStatus mlirBytecodeEmitErrorImpl(void *context, const char *fmt,
   return mlirBytecodeFailure();
 }
 #endif
+
+void *mlirBytecodeAllocate(void *context, size_t bytes) {
+  return malloc(bytes);
+}
+
+void mlirBytecodeFree(void *context, void *ptr) { free(ptr); }
 
 MlirBytecodeBytesRef getString(void *context, MlirBytecodeStringHandle hdl) {
   ParsingState *state = context;
@@ -652,32 +659,25 @@ MlirBytecodeStatus mlirBytecodeOperationStatePush(
 MlirBytecodeStatus
 mlirBytecodeOperationBlockPush(void *context,
                                MlirBytecodeOperationHandle opHandle,
-                               MlirBytecodeHandlesRef typeAndLocs) {
+                               MlirBytecodeSize numArgs) {
+  MlirBytecodeOperationState *opState = opHandle;
+  opState->numArgsRemaining = numArgs;
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus mlirBytecodeOperationBlockAddArgument(
+    void *context, MlirBytecodeOperationHandle opHandle,
+    MlirBytecodeTypeHandle type, MlirBytecodeLocHandle loc) {
   ParsingState *state = context;
-  bool first = true;
+  MlirBytecodeOperationState *opState = opHandle;
   printf("%*cblock", state->indentSize, '_');
   state->indentSize += 2;
 
-  for (uint64_t i = 0; i < typeAndLocs.length; ++i) {
-    MlirBytecodeTypeHandle type = typeAndLocs.handles[2 * i];
-    // MlirBytecodeAttrHandle loc = typeAndLocs.handles[2 * i + 1];
-    if (first) {
-      printf("(");
-    }
-    // Note: block args locs push the print form too much.
-    if (first)
-      printf("%%%d : %s", state->ssaIdStack[state->depth]++,
-             getType(context, type).data);
-    else
-      printf(", %%%d : %s", state->ssaIdStack[state->depth]++,
-             getType(context, type).data);
-    first = false;
-  }
-
-  if (!first)
-    printf(")");
-  printf(" ::\n");
-
+  // Note: block args locs push the print form too much.
+  printf("%%%d : %s ", state->ssaIdStack[state->depth]++,
+         getType(context, type).data);
+  if (!(--opState->numArgsRemaining))
+    printf("\n");
   return mlirBytecodeSuccess();
 }
 
@@ -729,35 +729,16 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
 }
 
 MlirBytecodeStatus printOperationPrefix(void *context,
-                                        MlirBytecodeOperationState *opState,
-                                        MlirBytecodeHandlesRef retTypes) {
+                                        MlirBytecodeOperationState *opState) {
   ParsingState *state = context;
   MlirBytecodeOpRef opRef = mlirBytecodeGetOpName(context, opState->name);
   MlirBytecodeBytesRef opName = getString(context, opRef.op);
   MlirBytecodeBytesRef dialectName = getString(context, opRef.dialect);
 
-  bool first = true;
-  printf("%*c", state->indentSize, ' ');
-
-  first = true;
-  for (int i = 0, e = retTypes.length; i < e; ++i) {
-    if (i != 0)
-      printf(", ");
-
-    printf("%%%d", state->ssaIdStack[state->depth]++);
-    MlirBytecodeStatus ret =
-        mlirBytecodeParseType(context, retTypes.handles[i]);
-    if (mlirBytecodeSucceeded(ret)) {
-      printf(":%.*s", (int)state->types[retTypes.handles[i].id].length,
-             state->types[retTypes.handles[i].id].data);
-    } else if (mlirBytecodeFailed(ret))
-      return ret;
-    else
-      printf(":<<unknown type>>");
-    first = false;
-  }
-  if (!first)
-    printf(" = ");
+  if (opState->hasResults)
+    printf("= ");
+  else
+    printf("%*c", state->indentSize, ' ');
 
   printf("%.*s.%.*s", (int)dialectName.length, dialectName.data,
          (int)opName.length, opName.data);
@@ -780,33 +761,43 @@ MlirBytecodeStatus printOperationPrefix(void *context,
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddResultTypes(
     void *context, MlirBytecodeOperationStateHandle opStateHandle,
-    MlirBytecodeHandlesRef ref) {
+    MlirBytecodeSize numResults) {
+  ParsingState *state = context;
   MlirBytecodeOperationState *opState = opStateHandle;
   opState->hasResults = true;
-  return printOperationPrefix(context, opState, ref);
+  printf("%*c", state->indentSize, ' ');
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus mlirBytecodeOperationStateAddResultType(
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeTypeHandle type) {
+  ParsingState *state = context;
+  printf("%%%d", state->ssaIdStack[state->depth]++);
+  MlirBytecodeStatus ret = mlirBytecodeParseType(context, type);
+  if (mlirBytecodeSucceeded(ret)) {
+    printf(":%.*s ", (int)state->types[type.id].length,
+           state->types[type.id].data);
+  } else if (mlirBytecodeFailed(ret)) {
+    return ret;
+  } else {
+    printf(":<<unknown type>> ");
+  }
+  return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddOperands(
     void *context, MlirBytecodeOperationStateHandle opStateHandle,
-    MlirBytecodeHandlesRef ref) {
+    MlirBytecodeSize numOperands) {
   MlirBytecodeOperationState *opState = opStateHandle;
-  if (!opState->hasResults)
-    if (!mlirBytecodeSucceeded(printOperationPrefix(
-            context, opState,
-            (MlirBytecodeHandlesRef){.handles = NULL, .length = 0})))
-      return mlirBytecodeSuccess();
   opState->hasOperands = true;
+  return printOperationPrefix(context, opState);
+}
 
-  bool first = true;
-  printf("(");
-  for (uint64_t i = 0; i < ref.length; ++i) {
-    if (first)
-      printf("%%%d", (int)ref.handles[i].id);
-    else
-      printf(", %%%d", (int)ref.handles[i].id);
-    first = false;
-  }
-  printf(")");
+MlirBytecodeStatus mlirBytecodeOperationStateAddOperand(
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeValueHandle value) {
+  printf("%%%d ", (int)value.id);
 
   return mlirBytecodeSuccess();
 }
@@ -816,10 +807,8 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
     bool isIsolatedFromAbove) {
   MlirBytecodeOperationState *opState = opStateHandle;
   mlirBytecodeEmitDebug("numRegions = %d", (int)n);
-  if (!opState->hasResults && !opState->hasOperands)
-    if (!mlirBytecodeSucceeded(printOperationPrefix(
-            context, opState,
-            (MlirBytecodeHandlesRef){.handles = NULL, .length = 0})))
+  if (!opState->hasOperands)
+    if (!mlirBytecodeSucceeded(printOperationPrefix(context, opState)))
       return mlirBytecodeSuccess();
   opState->hasRegions = true;
   opState->isIsolated = isIsolatedFromAbove;
@@ -829,20 +818,22 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddRegions(
 
 MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessors(
     void *context, MlirBytecodeOperationStateHandle opStateHandle,
-    MlirBytecodeSizesRef ref) {
-  MlirBytecodeOperationState *opState = opStateHandle;
-  uint64_t numSuccessors = ref.length;
-  if (!opState->hasResults && !opState->hasOperands && !opState->hasRegions)
-    if (!mlirBytecodeSucceeded(printOperationPrefix(
-            context, opState,
-            (MlirBytecodeHandlesRef){.handles = NULL, .length = 0})))
-      return mlirBytecodeSuccess();
+    MlirBytecodeSize numSuccessors) {
   if (numSuccessors > 0) {
     printf(" // successors:");
-    for (uint64_t i = 0; i < numSuccessors; ++i)
-      printf(" ^%" PRIu64, ref.sizes[i]);
+    MlirBytecodeOperationState *opState = opStateHandle;
+    if (!opState->hasOperands && !opState->hasRegions)
+      if (!mlirBytecodeSucceeded(printOperationPrefix(context, opState)))
+        return mlirBytecodeSuccess();
+    opState->hasSuccessors = true;
   }
-  opState->hasSuccessors = true;
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessor(
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeHandle successor) {
+  printf(" ^%" PRIu64, successor.id);
   return mlirBytecodeSuccess();
 }
 
@@ -853,12 +844,9 @@ mlirBytecodeOperationStatePop(void *context,
   MlirBytecodeOperationState *opState = opStateHandle;
   mlirBytecodeEmitDebug("operation state pop [from depth = %d]", stateDepth);
   --stateDepth;
-  if (!opState->hasResults && !opState->hasOperands && !opState->hasRegions &&
-      !opState->hasSuccessors)
-    if (!mlirBytecodeSucceeded(printOperationPrefix(
-            context, opState,
-            (MlirBytecodeHandlesRef){.handles = NULL, .length = 0})))
-      return mlirBytecodeSuccess();
+  if (!opState->hasOperands && !opState->hasRegions && !opState->hasSuccessors)
+    if (!mlirBytecodeSucceeded(printOperationPrefix(context, opState)))
+      return mlirBytecodeFailure();
   if (!opState->hasRegions)
     printf("\n");
   *opHandle = opStateHandle;
@@ -944,7 +932,7 @@ int main(int argc, char **argv) {
 
   MlirBytecodeBytesRef ref = {.data = stream, .length = fileInfo.st_size};
   MlirBytecodeParserState parserState =
-      mlirBytecodePopulateParserState(&state, ref, NULL, 0);
+      mlirBytecodePopulateParserState(&state, ref);
 
   if (!mlirBytecodeParserStateEmpty(&parserState) &&
       mlirBytecodeFailed(mlirBytecodeParse(&state, &parserState, NULL)))
