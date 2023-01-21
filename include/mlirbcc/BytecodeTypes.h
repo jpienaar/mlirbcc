@@ -45,6 +45,7 @@ typedef MlirBytecodeHandle MlirBytecodeOpHandle;
 typedef MlirBytecodeHandle MlirBytecodeResourceHandle;
 typedef MlirBytecodeHandle MlirBytecodeStringHandle;
 typedef MlirBytecodeHandle MlirBytecodeTypeHandle;
+typedef MlirBytecodeHandle MlirBytecodeValueHandle;
 
 /// Reference to section of memory.
 // Does not own the underlying string. This is equivalent to llvm::StringRef.
