@@ -94,11 +94,13 @@ struct ParsingState {
   MlirBytecodeAttribute *attributes;
   // Mapping from attribute handle to range.
   MlirBytecodeAttributeOrTypeRange *attributeRange;
+  int numAttributes;
 
   // Type handle to string representation.
   MlirMutableBytesRef *types;
   // Mapping from type handle to range.
   MlirBytecodeAttributeOrTypeRange *typeRange;
+  int numTypes;
 
   // Last used SSA at current depth.
   int ssaIdStack[MAX_DEPTH];
@@ -377,7 +379,10 @@ mlirBytecodeCreateBuiltinTypeAttr(void *context,
                                   MlirBytecodeAttrHandle bcAttrHandle,
                                   MlirBytecodeTypeHandle value) {
   ParsingState *state = context;
-  state->attributes[bcAttrHandle.id] = getType(context, value);
+  MlirMutableBytesRef type = getType(context, value);
+  state->attributes[bcAttrHandle.id].data = malloc(type.length + 1);
+  memcpy(state->attributes[bcAttrHandle.id].data, type.data, type.length + 1);
+  state->attributes[bcAttrHandle.id].length = type.length;
 
   mlirBytecodeEmitDebug("%s", state->attributes[bcAttrHandle.id].data);
   return mlirBytecodeSuccess();
@@ -510,6 +515,7 @@ static MlirBytecodeStatus mlirBytecodeAttributesPush(void *context,
   state->attributeRange = (MlirBytecodeAttributeOrTypeRange *)malloc(
       total * sizeof(*state->attributeRange));
   mlirBytecodeEmitDebug("alloc'd state->attributes / %d", (int)total);
+  state->numAttributes = total;
   return mlirBytecodeSuccess();
 }
 
@@ -535,6 +541,7 @@ static MlirBytecodeStatus mlirBytecodeTypesPush(void *context,
   memset(state->types, 0, total * sizeof(*state->types));
   state->typeRange = (MlirBytecodeAttributeOrTypeRange *)malloc(
       total * sizeof(*state->typeRange));
+  state->numTypes = total;
   mlirBytecodeEmitDebug("alloc'd state->types");
   return mlirBytecodeSuccess();
 }
@@ -559,7 +566,7 @@ mlirBytecodeDialectOpCallBack(void *context, MlirBytecodeOpHandle opHdl,
   ParsingState *state = context;
   mlirBytecodeEmitDebug("\t\tdialect[%d] :: op[%d] = %d", (int)dialectHandle.id,
                         (int)opHdl.id, (int)stringHdl.id);
-  const int total = 100;
+  const MlirBytecodeSize total = 100;
   if (!state->ops) {
     // FIXME
     state->ops = malloc(total * sizeof(*state->ops));
@@ -660,8 +667,13 @@ MlirBytecodeStatus
 mlirBytecodeOperationBlockPush(void *context,
                                MlirBytecodeOperationHandle opHandle,
                                MlirBytecodeSize numArgs) {
+  ParsingState *state = context;
   MlirBytecodeOperationState *opState = opHandle;
   opState->numArgsRemaining = numArgs;
+  printf("%*cblock", state->indentSize, '_');
+  if (numArgs)
+    printf(" ");
+  state->indentSize += 2;
   return mlirBytecodeSuccess();
 }
 
@@ -670,8 +682,6 @@ MlirBytecodeStatus mlirBytecodeOperationBlockAddArgument(
     MlirBytecodeTypeHandle type, MlirBytecodeLocHandle loc) {
   ParsingState *state = context;
   MlirBytecodeOperationState *opState = opHandle;
-  printf("%*cblock", state->indentSize, '_');
-  state->indentSize += 2;
 
   // Note: block args locs push the print form too much.
   printf("%%%d : %s ", state->ssaIdStack[state->depth]++,
@@ -755,6 +765,9 @@ MlirBytecodeStatus printOperationPrefix(void *context,
       printf(" << unhandled >> ");
     }
   }
+
+  if (opState->hasOperands)
+    printf(" ");
 
   return mlirBytecodeSuccess();
 }
@@ -854,41 +867,42 @@ mlirBytecodeOperationStatePop(void *context,
 }
 
 MlirBytecodeStatus
-mlirBytecodeResourceSectionEnter(void *context,
-                                 MlirBytecodeSize numExternalResourceGroups) {
-  printf("-- Number of resource groups: %d\n", (int)numExternalResourceGroups);
+mlirBytecodeResourceDialectGroupEnter(void *context,
+                                      MlirBytecodeDialectHandle dialect,
+                                      MlirBytecodeSize numResources) {
+  printf("\tgroup %d\n", (int)numResources);
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus
-mlirBytecodeResourceGroupEnter(void *context, MlirBytecodeStringHandle groupKey,
-                               MlirBytecodeSize numResources) {
+mlirBytecodeResourceExternalGroupEnter(void *context,
+                                       MlirBytecodeStringHandle groupKey,
+                                       MlirBytecodeSize numResources) {
   printf("\tgroup '%s'\n", getString(context, groupKey).data);
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
-    void *context, MlirBytecodeStringHandle groupKey,
-    MlirBytecodeStringHandle resourceKey, MlirBytecodeBytesRef blob) {
-  printf("\t\tblob size(resource %s. %s) = %" PRIu64 "\n",
-         getString(context, groupKey).data,
+MlirBytecodeStatus
+mlirBytecodeResourceBlobCallBack(void *context,
+                                 MlirBytecodeStringHandle resourceKey,
+                                 MlirBytecodeBytesRef blob) {
+  printf("\t\tblob size(resource %s) = %" PRIu64 "\n",
          getString(context, resourceKey).data, blob.length);
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
-    void *context, MlirBytecodeStringHandle groupKey,
-    MlirBytecodeStringHandle resourceKey, uint8_t boolResource) {
-  printf("\t\tbool resource %s. %s = %d\n", getString(context, groupKey).data,
-         getString(context, resourceKey).data, boolResource);
+    void *context, MlirBytecodeStringHandle resourceKey, uint8_t boolResource) {
+  printf("\t\tbool resource %s = %d\n", getString(context, resourceKey).data,
+         boolResource);
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeResourceStringCallBack(
-    void *context, MlirBytecodeStringHandle groupKey,
-    MlirBytecodeStringHandle resourceKey, MlirBytecodeStringHandle strHandle) {
-  printf("\t\tstring resource %s. %s = %s\n", getString(context, groupKey).data,
-         getString(context, resourceKey).data,
+MlirBytecodeStatus
+mlirBytecodeResourceStringCallBack(void *context,
+                                   MlirBytecodeStringHandle resourceKey,
+                                   MlirBytecodeStringHandle strHandle) {
+  printf("\t\tstring resource %s = %s\n", getString(context, resourceKey).data,
          getString(context, strHandle).data);
   return mlirBytecodeSuccess();
 }
@@ -935,11 +949,21 @@ int main(int argc, char **argv) {
       mlirBytecodePopulateParserState(&state, ref);
 
   if (!mlirBytecodeParserStateEmpty(&parserState) &&
-      mlirBytecodeFailed(mlirBytecodeParse(&state, &parserState, NULL)))
+      mlirBytecodeFailed(mlirBytecodeParse(&state, &parserState, NULL))) {
     return mlirBytecodeEmitError(NULL, "MlirBytecodeFailed to parse file"), 1;
+  }
 
-  mlirBytecodeParseAttribute(&state, (MlirBytecodeAttrHandle){.id = 2});
-
+  free(state.ops);
+  free(state.attributeRange);
+  for (int i = 0, e = state.numAttributes; i != e; ++i)
+    free(state.attributes[i].data);
+  free(state.attributes);
+  free(state.typeRange);
+  for (int i = 0, e = state.numTypes; i != e; ++i)
+    free(state.types[i].data);
+  free(state.types);
+  free(state.dialectStr);
+  free(state.strings);
   if (munmap(stream, fileInfo.st_size) == -1) {
     close(fd);
     perror("Error un-mmapping the file");

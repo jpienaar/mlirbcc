@@ -25,6 +25,7 @@
 
 // TODO: Support for big-endian architectures.
 
+#include "BytecodeTypes.h"
 #include "mlirbcc/BytecodeTypes.h"
 
 #include <assert.h>
@@ -178,27 +179,27 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeDialectOpCallBack(
     void *context, MlirBytecodeOpHandle, MlirBytecodeDialectHandle,
     MlirBytecodeStringHandle);
 
-/// Invoked when starting parsing of resources.
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceSectionEnter(
-    void *context, MlirBytecodeSize numExternalResourceGroups);
+/// Invoked when starting parsing of group of resources.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceDialectGroupEnter(
+    void *context, MlirBytecodeDialectHandle dialect,
+    MlirBytecodeSize numResources);
 
 /// Invoked when starting parsing of group of resources.
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeResourceGroupEnter(void *context, MlirBytecodeStringHandle groupKey,
-                               MlirBytecodeSize numResources);
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceExternalGroupEnter(
+    void *context, MlirBytecodeStringHandle groupKey,
+    MlirBytecodeSize numResources);
 
 /// Invoked per blob resource in group.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
-    void *context, MlirBytecodeStringHandle groupKey,
-    MlirBytecodeStringHandle resourceKey, MlirBytecodeBytesRef blob);
+    void *context, MlirBytecodeStringHandle resourceKey,
+    MlirBytecodeBytesRef blob);
 /// Invoked per bool resource in group.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
-    void *context, MlirBytecodeStringHandle groupKey,
-    MlirBytecodeStringHandle resourceKey, const uint8_t);
+    void *context, MlirBytecodeStringHandle resourceKey, const uint8_t);
 /// Invoked per string resource in group.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceStringCallBack(
-    void *context, MlirBytecodeStringHandle groupKey,
-    MlirBytecodeStringHandle resourceKey, MlirBytecodeStringHandle);
+    void *context, MlirBytecodeStringHandle resourceKey,
+    MlirBytecodeStringHandle);
 
 /// Invoked when entering strings section with total number of strings.
 MLIRBC_DEF MlirBytecodeStatus
@@ -979,11 +980,8 @@ mlirBytecodeParseResourceSection(void *context,
   if (!numExternalResourceGroups)
     return mlirBytecodeSuccess();
 
-  ret = mlirBytecodeResourceSectionEnter(context, numExternalResourceGroups);
-  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-    return ret;
-
-  for (uint64_t i = 0; i < numExternalResourceGroups; ++i) {
+  uint64_t i = 0;
+  while (!mlirBytecodeStreamEmpty(&resPP)) {
     MlirBytecodeStringHandle groupKey;
     ret = mlirBytecodeParseHandle(context, &offsetStream, &groupKey);
     if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
@@ -996,7 +994,11 @@ mlirBytecodeParseResourceSection(void *context,
       return mlirBytecodeEmitError(context,
                                    "invalid/missing number of resources");
 
-    ret = mlirBytecodeResourceGroupEnter(context, groupKey, numResources);
+    ret = i < numExternalResourceGroups
+              ? mlirBytecodeResourceExternalGroupEnter(context, groupKey,
+                                                       numResources)
+              : mlirBytecodeResourceDialectGroupEnter(context, groupKey,
+                                                      numResources);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
 
@@ -1033,8 +1035,7 @@ mlirBytecodeParseResourceSection(void *context,
           return mlirBytecodeFailure();
         MlirBytecodeBytesRef blob = {.data = resPP.pos, .length = size};
         ret = mlirBytecodeResourceBlobCallBack(
-            context, groupKey, (MlirBytecodeStringHandle){.id = resourceKey},
-            blob);
+            context, (MlirBytecodeStringHandle){.id = resourceKey}, blob);
         if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
           return ret;
         break;
@@ -1046,8 +1047,7 @@ mlirBytecodeParseResourceSection(void *context,
           return mlirBytecodeEmitError(context,
                                        "invalid/missing resource entry");
         ret = mlirBytecodeResourceBoolCallBack(
-            context, groupKey, (MlirBytecodeStringHandle){.id = resourceKey},
-            value);
+            context, (MlirBytecodeStringHandle){.id = resourceKey}, value);
         if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
           return ret;
         break;
@@ -1059,8 +1059,7 @@ mlirBytecodeParseResourceSection(void *context,
           return mlirBytecodeEmitError(context,
                                        "invalid/missing resource value");
         ret = mlirBytecodeResourceStringCallBack(
-            context, groupKey, (MlirBytecodeStringHandle){.id = resourceKey},
-            value);
+            context, (MlirBytecodeStringHandle){.id = resourceKey}, value);
         if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
           return ret;
         break;

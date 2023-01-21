@@ -913,20 +913,24 @@ mlirBytecodeDialectOpCallBack(void *context, MlirBytecodeOpHandle opHandle,
 }
 
 MlirBytecodeStatus
-mlirBytecodeResourceSectionEnter(void *context,
-                                 MlirBytecodeSize numExternalResourceGroups) {
+mlirBytecodeResourceDialectGroupEnter(void *context,
+                                      MlirBytecodeDialectHandle dialect,
+                                      MlirBytecodeSize numResources) {
   return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus
-mlirBytecodeResourceGroupEnter(void *context, MlirBytecodeStringHandle groupKey,
-                               MlirBytecodeSize numResources) {
+mlirBytecodeResourceExternalGroupEnter(void *context,
+                                       MlirBytecodeStringHandle groupKey,
+                                       MlirBytecodeSize numResources) {
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
-    void *context, MlirBytecodeStringHandle resourceKey,
-    MlirBytecodeStringHandle groupKey, MlirBytecodeBytesRef blob) {
+MlirBytecodeStatus
+mlirBytecodeResourceBlobCallBack(void *context,
+                                 MlirBytecodeStringHandle resourceKey,
+                                 MlirBytecodeBytesRef blob) {
+  /*
   ParsingState &state = *(ParsingState *)context;
   FailureOr<StringRef> group = state.string(groupKey);
   if (failed(group))
@@ -937,18 +941,19 @@ MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
     emitWarning(state.fileLoc)
         << "ignoring unknown external resources for '" << *group << "'";
   }
+   */
   return mlirBytecodeUnhandled();
 }
 
 MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
-    void *context, MlirBytecodeStringHandle resourceKey,
-    MlirBytecodeStringHandle groupKey, const uint8_t) {
+    void *context, MlirBytecodeStringHandle resourceKey, const uint8_t) {
   return mlirBytecodeUnhandled();
 }
 
-MlirBytecodeStatus mlirBytecodeResourceStringCallBack(
-    void *context, MlirBytecodeStringHandle resourceKey,
-    MlirBytecodeStringHandle groupKey, MlirBytecodeStringHandle) {
+MlirBytecodeStatus
+mlirBytecodeResourceStringCallBack(void *context,
+                                   MlirBytecodeStringHandle resourceKey,
+                                   MlirBytecodeStringHandle) {
   return mlirBytecodeUnhandled();
 }
 
