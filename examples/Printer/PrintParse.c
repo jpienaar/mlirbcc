@@ -882,10 +882,9 @@ mlirBytecodeResourceExternalGroupEnter(void *context,
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus
-mlirBytecodeResourceBlobCallBack(void *context,
-                                 MlirBytecodeStringHandle resourceKey,
-                                 MlirBytecodeBytesRef blob) {
+MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
+    void *context, MlirBytecodeStringHandle resourceKey,
+    MlirBytecodeSize alignment, MlirBytecodeBytesRef blob) {
   printf("\t\tblob size(resource %s) = %" PRIu64 "\n",
          getString(context, resourceKey).data, blob.length);
   return mlirBytecodeSuccess();
