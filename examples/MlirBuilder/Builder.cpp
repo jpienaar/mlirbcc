@@ -241,7 +241,7 @@ struct ParsingState {
 
   MLIRContext *getContext() const { return fileLoc->getContext(); }
 
-  std::vector<AsmDialectResourceHandle> resources;
+  std::vector<AsmDialectResourceHandle> dialectResources;
   std::vector<BytecodeAttribute> attributes;
   std::vector<BytecodeDialect> dialects;
   std::vector<BytecodeOperationName> opNames;
@@ -250,6 +250,11 @@ struct ParsingState {
 
   /// The configuration of the parser.
   const ParserConfig &config;
+
+  /// The resource parser to use for the current resource group.
+  AsmResourceParser *resourceHandler;
+  /// Processing for the resource key.
+  function_ref<LogicalResult(StringRef)> resourceProcessResourceKeyFn;
 
   /// Location to use for reporting errors.
   Location fileLoc;
@@ -489,9 +494,9 @@ MlirBytecodeDialectBytecodeReader::readResourceHandle() {
   if (!mlirBytecodeSucceeded(
           mlirBytecodeDialectReaderReadResourceHandle(&reader, &handle)))
     return failure();
-  if (handle.id >= state.resources.size())
+  if (handle.id >= state.dialectResources.size())
     return failure();
-  return state.resources[handle.id];
+  return state.dialectResources[handle.id];
 }
 
 void mlirBytecodeIRSectionEnter(void *context, void *retBlock) {
@@ -690,7 +695,6 @@ MlirBytecodeStatus
 mlirBytecodeOperationBlockPush(void *context,
                                MlirBytecodeOperationHandle opHandle,
                                MlirBytecodeSize numArgs) {
-  ParsingState &state = *(ParsingState *)context;
   // TODO: Add method to pre-size numArgs.
   return mlirBytecodeSuccess();
 }
@@ -707,8 +711,9 @@ MlirBytecodeStatus mlirBytecodeOperationBlockAddArgument(
     return mlirBytecodeEmitError(context, "invalid location");
 
   auto &readState = state.regionStack.back();
-  defineValues(state,
-               readState.curBlock->addArgument(t, cast<LocationAttr>(locAttr)));
+  if (failed(defineValues(state, readState.curBlock->addArgument(
+                                     t, cast<LocationAttr>(locAttr)))))
+    return mlirBytecodeFailure();
   return mlirBytecodeSuccess();
 }
 
@@ -912,10 +917,152 @@ mlirBytecodeDialectOpCallBack(void *context, MlirBytecodeOpHandle opHandle,
   return mlirBytecodeSuccess();
 }
 
+//===----------------------------------------------------------------------===//
+// ResourceSectionReader
+//===----------------------------------------------------------------------===//
+
+namespace {
+class ParsedResourceEntry : public AsmParsedResourceEntry {
+public:
+  ParsedResourceEntry(StringRef key, AsmResourceEntryKind kind,
+                      ParsingState &state,
+                      const std::shared_ptr<llvm::SourceMgr> &bufferOwnerRef)
+      : key(key), kind(kind), state(state), bufferOwnerRef(bufferOwnerRef) {}
+  ~ParsedResourceEntry() override = default;
+
+  static ParsedResourceEntry
+  getBlob(ParsingState &state, StringRef key, MlirBytecodeSize alignment,
+          ArrayRef<uint8_t> data,
+          const std::shared_ptr<llvm::SourceMgr> &bufferOwnerRef = nullptr) {
+    ParsedResourceEntry ret(key, AsmResourceEntryKind::Blob, state, {});
+    ret.U.blob.alignment = alignment;
+    ret.U.blob.data = data;
+    return ret;
+  }
+
+  static ParsedResourceEntry getBool(ParsingState &state, StringRef key,
+                                     bool value) {
+    ParsedResourceEntry ret(key, AsmResourceEntryKind::Bool, state, {});
+    ret.U.boolValue = value;
+    return ret;
+  }
+
+  static ParsedResourceEntry getString(ParsingState &state, StringRef key,
+                                       MlirBytecodeStringHandle value) {
+    ParsedResourceEntry ret(key, AsmResourceEntryKind::String, state, {});
+    ret.U.stringHandle = value;
+    return ret;
+  }
+
+  StringRef getKey() const final { return key; }
+
+  InFlightDiagnostic emitError() const final { return state.emitError(); }
+
+  AsmResourceEntryKind getKind() const final { return kind; }
+
+  FailureOr<bool> parseAsBool() const final {
+    if (kind != AsmResourceEntryKind::Bool)
+      return emitError() << "expected a bool resource entry, but found a "
+                         << toString(kind) << " entry instead";
+    return U.boolValue;
+  }
+  FailureOr<std::string> parseAsString() const final {
+    if (kind != AsmResourceEntryKind::String)
+      return emitError() << "expected a string resource entry, but found a "
+                         << toString(kind) << " entry instead";
+    return state.string(U.stringHandle);
+  }
+
+  FailureOr<AsmResourceBlob>
+  parseAsBlob(BlobAllocatorFn allocator) const final {
+    if (kind != AsmResourceEntryKind::Blob)
+      return emitError() << "expected a blob resource entry, but found a "
+                         << toString(kind) << " entry instead";
+
+    // If we have an extendable reference to the buffer owner, we don't need to
+    // allocate a new buffer for the data, and can use the data directly.
+    if (bufferOwnerRef) {
+      ArrayRef<char> charData(
+          reinterpret_cast<const char *>(U.blob.data.data()),
+          U.blob.data.size());
+
+      // Allocate an unmanager buffer which captures a reference to the owner.
+      // For now we just mark this as immutable, but in the future we should
+      // explore marking this as mutable when desired.
+      return UnmanagedAsmResourceBlob::allocateWithAlign(
+          charData, U.blob.alignment,
+          [bufferOwnerRef = bufferOwnerRef](void *, size_t, size_t) {});
+    }
+
+    // Allocate memory for the blob using the provided allocator and copy the
+    // data into it.
+    AsmResourceBlob blob = allocator(U.blob.data.size(), U.blob.alignment);
+    assert(llvm::isAddrAligned(llvm::Align(U.blob.alignment),
+                               blob.getData().data()) &&
+           blob.isMutable() &&
+           "blob allocator did not return a properly aligned address");
+    memcpy(blob.getMutableData().data(), U.blob.data.data(),
+           U.blob.data.size());
+    return blob;
+  }
+
+private:
+  StringRef key;
+  AsmResourceEntryKind kind;
+
+  /// The union of possible resource values parsed.
+  union ParsedResouce {
+    ParsedResouce() : boolValue(false) {}
+
+    union {
+      ArrayRef<uint8_t> data;
+      int64_t alignment;
+    } blob;
+    MlirBytecodeStringHandle stringHandle;
+    bool boolValue;
+  } U;
+
+  ParsingState &state;
+  const std::shared_ptr<llvm::SourceMgr> &bufferOwnerRef;
+};
+} // namespace
+
 MlirBytecodeStatus
 mlirBytecodeResourceDialectGroupEnter(void *context,
                                       MlirBytecodeDialectHandle dialect,
                                       MlirBytecodeSize numResources) {
+  mlirBytecodeEmitDebug("entering dialect resource group");
+  ParsingState &state = *(ParsingState *)context;
+  state.resourceHandler = nullptr;
+
+  /*
+  auto dialectOr = state.dialects[dialect.id];
+    Dialect *loadedDialect = dialectOr.getLoadedDialect();
+    if (!loadedDialect) {
+      return
+      mlirBytecodeEmitError(context,
+        "dialect '%s' is unknown", dialectOr.name);
+    }
+    state.resourceHandler = dyn_cast<OpAsmDialectInterface>(loadedDialect);
+    if (!state.resourceHandler) {
+      return
+      mlirBytecodeEmitError(context,
+        "unexpected resources for dialect '%s'", dialectOr.name);
+    }
+
+  state.resourceProcessResourceKeyFn = [&](StringRef key) -> LogicalResult {
+      FailureOr<AsmDialectResourceHandle> handle =
+          state.resourceHandler->declareResource(key);
+      if (failed(handle)) {
+        return emitError()
+               << "unknown 'resource' key '" << key << "' for dialect '"
+               << dialectOr->name << "'";
+      }
+      state.dialectResources.push_back(*handle);
+      return success();
+    };
+    */
+
   return mlirBytecodeSuccess();
 }
 
@@ -923,38 +1070,63 @@ MlirBytecodeStatus
 mlirBytecodeResourceExternalGroupEnter(void *context,
                                        MlirBytecodeStringHandle groupKey,
                                        MlirBytecodeSize numResources) {
-  return mlirBytecodeSuccess();
-}
-
-MlirBytecodeStatus
-mlirBytecodeResourceBlobCallBack(void *context,
-                                 MlirBytecodeStringHandle resourceKey,
-                                 MlirBytecodeBytesRef blob) {
-  /*
+  mlirBytecodeEmitDebug("entering external resource group");
   ParsingState &state = *(ParsingState *)context;
   FailureOr<StringRef> group = state.string(groupKey);
   if (failed(group))
     return mlirBytecodeEmitError(context, "invalid string index");
 
-  AsmResourceParser *handler = state.config.getResourceParser(*group);
-  if (!handler) {
+  state.resourceHandler = state.config.getResourceParser(*group);
+  if (!state.resourceHandler) {
     emitWarning(state.fileLoc)
         << "ignoring unknown external resources for '" << *group << "'";
   }
-   */
-  return mlirBytecodeUnhandled();
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
+    void *context, MlirBytecodeStringHandle resourceKey,
+    MlirBytecodeSize alignment, MlirBytecodeBytesRef blob) {
+  ParsingState &state = *(ParsingState *)context;
+  if (!state.resourceHandler)
+    return mlirBytecodeUnhandled();
+  auto keyOr = state.string(resourceKey);
+  if (failed(keyOr))
+    return mlirBytecodeFailure();
+  auto entry = ParsedResourceEntry::getBlob(
+      state, keyOr.value(), alignment,
+      ArrayRef(static_cast<const uint8_t *>(blob.data), blob.length));
+  auto ret = state.resourceHandler->parseResource(entry);
+  return succeeded(ret) ? mlirBytecodeSuccess() : mlirBytecodeFailure();
+  return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
-    void *context, MlirBytecodeStringHandle resourceKey, const uint8_t) {
-  return mlirBytecodeUnhandled();
+    void *context, MlirBytecodeStringHandle resourceKey, const uint8_t value) {
+  ParsingState &state = *(ParsingState *)context;
+  if (!state.resourceHandler)
+    return mlirBytecodeUnhandled();
+  auto keyOr = state.string(resourceKey);
+  if (failed(keyOr))
+    return mlirBytecodeFailure();
+  auto entry = ParsedResourceEntry::getBool(state, keyOr.value(), value);
+  auto ret = state.resourceHandler->parseResource(entry);
+  return succeeded(ret) ? mlirBytecodeSuccess() : mlirBytecodeFailure();
 }
 
 MlirBytecodeStatus
 mlirBytecodeResourceStringCallBack(void *context,
                                    MlirBytecodeStringHandle resourceKey,
-                                   MlirBytecodeStringHandle) {
-  return mlirBytecodeUnhandled();
+                                   MlirBytecodeStringHandle value) {
+  ParsingState &state = *(ParsingState *)context;
+  if (!state.resourceHandler)
+    return mlirBytecodeUnhandled();
+  auto keyOr = state.string(resourceKey);
+  if (failed(keyOr))
+    return mlirBytecodeFailure();
+  auto entry = ParsedResourceEntry::getString(state, keyOr.value(), value);
+  auto ret = state.resourceHandler->parseResource(entry);
+  return succeeded(ret) ? mlirBytecodeSuccess() : mlirBytecodeFailure();
 }
 
 MlirBytecodeStatus
@@ -1065,7 +1237,8 @@ int main(int argc, char **argv) {
   if (!mlirBytecodeSucceeded(
           ::readBytecodeFile(*buffer, moduleOp->getBody(), config)))
     return 1;
-  moduleOp->dump();
+  mlir::OpPrintingFlags flags;
+  moduleOp->print(llvm::errs(), flags);
 
   return 0;
 }

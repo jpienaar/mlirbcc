@@ -192,6 +192,7 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceExternalGroupEnter(
 /// Invoked per blob resource in group.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
     void *context, MlirBytecodeStringHandle resourceKey,
+    MlirBytecodeSize alignment,
     MlirBytecodeBytesRef blob);
 /// Invoked per bool resource in group.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
@@ -1035,7 +1036,10 @@ mlirBytecodeParseResourceSection(void *context,
           return mlirBytecodeFailure();
         MlirBytecodeBytesRef blob = {.data = resPP.pos, .length = size};
         ret = mlirBytecodeResourceBlobCallBack(
-            context, (MlirBytecodeStringHandle){.id = resourceKey}, blob);
+            context,
+            (MlirBytecodeStringHandle){.id = resourceKey},
+            alignment,
+            blob);
         if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
           return ret;
         break;
@@ -1490,18 +1494,16 @@ MlirBytecodeStatus mlirBytecodeParse(void *context,
   if (mlirBytecodeParserStateEmpty(parserState))
     return mlirBytecodeSuccess();
 
-  // TODO: Flip to check for succeeded.
-
   // Process the string section first.
-  if (mlirBytecodeFailed(mlirBytecodeForEachString(context, parserState)) ||
+  if (!mlirBytecodeSucceeded(mlirBytecodeForEachString(context, parserState)) ||
       // Process the dialect section.
-      mlirBytecodeFailed(
+      !mlirBytecodeSucceeded(
           mlirBytecodeParseDialectSection(context, parserState)) ||
       // Process the resource section if present.
-      mlirBytecodeFailed(
+      !mlirBytecodeSucceeded(
           mlirBytecodeParseResourceSection(context, parserState)) ||
       // Process the attribute and type section.
-      mlirBytecodeFailed(
+      !mlirBytecodeSucceeded(
           mlirBytecodeParseAttributeAndTypeSection(context, parserState)))
     return mlirBytecodeFailure();
 
