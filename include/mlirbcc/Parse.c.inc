@@ -982,7 +982,7 @@ mlirBytecodeParseResourceSection(void *context,
     return mlirBytecodeSuccess();
 
   uint64_t i = 0;
-  while (!mlirBytecodeStreamEmpty(&resPP)) {
+  while (!mlirBytecodeStreamEmpty(&offsetStream)) {
     MlirBytecodeStringHandle groupKey;
     ret = mlirBytecodeParseHandle(context, &offsetStream, &groupKey);
     if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
