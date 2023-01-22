@@ -1075,8 +1075,10 @@ mlirBytecodeResourceExternalGroupEnter(void *context,
   FailureOr<StringRef> group = state.string(groupKey);
   if (failed(group))
     return mlirBytecodeEmitError(context, "invalid string index");
+  mlirBytecodeEmitDebug("entering external resource group");
 
   state.resourceHandler = state.config.getResourceParser(*group);
+  mlirBytecodeEmitDebug("entering external resource group");
   if (!state.resourceHandler) {
     emitWarning(state.fileLoc)
         << "ignoring unknown external resources for '" << *group << "'";
@@ -1087,22 +1089,27 @@ mlirBytecodeResourceExternalGroupEnter(void *context,
 MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
     void *context, MlirBytecodeStringHandle resourceKey,
     MlirBytecodeSize alignment, MlirBytecodeBytesRef blob) {
+  mlirBytecodeEmitDebug("\tparsing blob resource");
   ParsingState &state = *(ParsingState *)context;
   if (!state.resourceHandler)
     return mlirBytecodeUnhandled();
+  mlirBytecodeEmitDebug("\tparsing blob resource");
   auto keyOr = state.string(resourceKey);
   if (failed(keyOr))
     return mlirBytecodeFailure();
+  mlirBytecodeEmitDebug("\tparsing blob resource");
   auto entry = ParsedResourceEntry::getBlob(
       state, keyOr.value(), alignment,
       ArrayRef(static_cast<const uint8_t *>(blob.data), blob.length));
+  mlirBytecodeEmitDebug("\tparsing blob resource");
   auto ret = state.resourceHandler->parseResource(entry);
+  mlirBytecodeEmitDebug("\tparsing blob resource");
   return succeeded(ret) ? mlirBytecodeSuccess() : mlirBytecodeFailure();
-  return mlirBytecodeSuccess();
 }
 
 MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
     void *context, MlirBytecodeStringHandle resourceKey, const uint8_t value) {
+  mlirBytecodeEmitDebug("\tparsing bool resource");
   ParsingState &state = *(ParsingState *)context;
   if (!state.resourceHandler)
     return mlirBytecodeUnhandled();
@@ -1118,13 +1125,18 @@ MlirBytecodeStatus
 mlirBytecodeResourceStringCallBack(void *context,
                                    MlirBytecodeStringHandle resourceKey,
                                    MlirBytecodeStringHandle value) {
+  mlirBytecodeEmitDebug("\tparsing string resource");
   ParsingState &state = *(ParsingState *)context;
+  mlirBytecodeEmitDebug("\tparsing string resource");
   if (!state.resourceHandler)
     return mlirBytecodeUnhandled();
   auto keyOr = state.string(resourceKey);
+  mlirBytecodeEmitDebug("\tparsing string resource");
   if (failed(keyOr))
     return mlirBytecodeFailure();
+  mlirBytecodeEmitDebug("\tparsing string resource");
   auto entry = ParsedResourceEntry::getString(state, keyOr.value(), value);
+  mlirBytecodeEmitDebug("\tparsing string resource");
   auto ret = state.resourceHandler->parseResource(entry);
   return succeeded(ret) ? mlirBytecodeSuccess() : mlirBytecodeFailure();
 }
@@ -1233,12 +1245,17 @@ int main(int argc, char **argv) {
   context.printOpOnDiagnostic(true);
   context.allowUnregisteredDialects(allowUnregisteredDialects);
   OwningOpRef<ModuleOp> moduleOp = ModuleOp::create(UnknownLoc::get(&context));
-  ParserConfig config(&context);
+  FallbackAsmResourceMap fallbackResourceMap;
+  ParserConfig config(&context, /*verifyAfterParse=*/true, &fallbackResourceMap);
+  // config.attachResourceParser()
   if (!mlirBytecodeSucceeded(
           ::readBytecodeFile(*buffer, moduleOp->getBody(), config)))
     return 1;
   mlir::OpPrintingFlags flags;
-  moduleOp->print(llvm::errs(), flags);
+  AsmState asmState(moduleOp.get(), flags, /*locationMap=*/nullptr,
+                      &fallbackResourceMap);
+    moduleOp->print(llvm::errs(), asmState);
+    llvm::errs() << '\n';
 
   return 0;
 }
