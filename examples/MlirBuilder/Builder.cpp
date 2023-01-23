@@ -243,6 +243,7 @@ struct ParsingState {
 
   MLIRContext *getContext() const { return fileLoc->getContext(); }
 
+  // Cached parsed entries.
   std::vector<AsmDialectResourceHandle> dialectResources;
   std::vector<BytecodeAttribute> attributes;
   std::vector<BytecodeDialect> dialects;
@@ -289,14 +290,13 @@ struct ParsingState {
 };
 
 LogicalResult BytecodeDialect::load(ParsingState &state, MLIRContext *ctx) {
-  if (dialect) {
+  if (dialect)
     return success();
-  }
   Dialect *loadedDialect = ctx->getOrLoadDialect(name);
   if (!loadedDialect && false) { // !ctx->allowsUnregisteredDialects()) {
     return state.emitError("dialect '")
            << name
-           << "' is unknown. If this is intended, please call "
+           << "' is unknown; if this is intended, please call "
               "allowUnregisteredDialects() on the MLIRContext, or use "
               "-allow-unregistered-dialect with the MLIR tool used";
   }
@@ -371,6 +371,7 @@ Value parseOperand(ParsingState &state, uint64_t i) {
 
 } // namespace
 
+#ifdef MLIRBC_VERBOSE_ERROR
 static MlirBytecodeStatus mlirBytecodeEmitErrorImpl(void *context,
                                                     const char *fmt, ...) {
   ParsingState &state = *(ParsingState *)context;
@@ -383,6 +384,7 @@ static MlirBytecodeStatus mlirBytecodeEmitErrorImpl(void *context,
   state.emitError(msg.get());
   return mlirBytecodeFailure();
 }
+#endif
 
 /// Wrapper around DialectBytecodeReader invoking C MlirBytecode API.
 struct MlirBytecodeDialectBytecodeReader : public mlir::DialectBytecodeReader {
@@ -449,6 +451,7 @@ MlirBytecodeDialectBytecodeReader::readSignedVarInt(int64_t &result) {
 FailureOr<APInt>
 MlirBytecodeDialectBytecodeReader::readAPIntWithKnownWidth(unsigned bitWidth) {
   MlirBytecodeAPInt result;
+  // TODO: This could be improved to not malloc and free for each large APInt.
   MlirBytecodeStatus ret = mlirBytecodeDialectReaderReadAPIntWithKnownWidth(
       &reader, bitWidth, malloc, &result);
   if (!mlirBytecodeSucceeded(ret))
@@ -471,7 +474,6 @@ MlirBytecodeDialectBytecodeReader::readAPFloatWithKnownSemantics(
   if (failed(intVal))
     return failure();
   return APFloat(semantics, *intVal);
-  return failure();
 }
 
 LogicalResult MlirBytecodeDialectBytecodeReader::readString(StringRef &result) {
