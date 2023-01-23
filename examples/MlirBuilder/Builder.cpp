@@ -908,6 +908,13 @@ mlirBytecodeDialectCallBack(void *context,
   return mlirBytecodeSuccess();
 }
 
+MlirBytecodeStatus mlirBytecodeDialectOpNames(void *context,
+                                              MlirBytecodeSize numOps) {
+  ParsingState &state = *(ParsingState *)context;
+  state.opNames.reserve(numOps);
+  return mlirBytecodeSuccess();
+}
+
 MlirBytecodeStatus
 mlirBytecodeDialectOpCallBack(void *context, MlirBytecodeOpHandle opHandle,
                               MlirBytecodeDialectHandle dialectHandle,
