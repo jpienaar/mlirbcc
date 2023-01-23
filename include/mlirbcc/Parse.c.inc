@@ -35,8 +35,10 @@
 #include <stdint.h>
 #include <string.h>
 
-#if defined(MLIRBC_DEBUG)
+#if defined(MLIRBC_DEBUG) || defined(MLIRBC_VERBOSE_ERROR)
 #include <stdarg.h>
+#endif
+#if defined(MLIRBC_DEBUG)
 #include <stdio.h>
 #endif
 
