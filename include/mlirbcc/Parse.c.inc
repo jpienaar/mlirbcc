@@ -830,7 +830,7 @@ mlirBytecodeParseDialectSection(void *context,
     ret = mbci_skipVarInts(context, &stream, numOpNames);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
-    ++numOps;
+    numOps += numOpNames;
   }
   ret = mlirBytecodeDialectOpNames(context, numOps);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
