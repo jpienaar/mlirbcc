@@ -16,8 +16,8 @@
 // entry point is `mlirBytecodeParse`.
 //
 // Callbacks/functions to be implemented in instantiation accept an opaque
-// pointer as first argument that gets directly propagated during parsing and
-// can be used by instantiation for additional/parse local state capture.
+// pointer as first argument that gets propagated during parsing and can be used
+// by instantiation for additional/parse local state capture.
 //
 // Convention followed in this file is to prefix implementation details with
 // mbci_. But there is more to do to differentiate between internal and
@@ -26,7 +26,6 @@
 // TODO: Support for big-endian architectures.
 
 #include "BytecodeTypes.h"
-#include "mlirbcc/BytecodeTypes.h"
 
 #include <assert.h>
 #include <inttypes.h>
@@ -36,7 +35,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#if defined(MLIRBC_DEBUG) || defined(MLIRBC_VERBOSE_ERROR)
+#if defined(MLIRBC_DEBUG)
 #include <stdarg.h>
 #include <stdio.h>
 #endif
@@ -72,6 +71,8 @@ static bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *parserState);
 //===----------------------------------------------------------------------===//
 // Functions required to be defined:
 #define MLIRBC_DEF static
+
+// - IR section hooks.
 
 /// Called upon entry of IR section with argumentless block to populate.
 MLIRBC_DEF void mlirBytecodeIRSectionEnter(void *context, void *retBlock);
@@ -227,10 +228,12 @@ mlirBytecodeParseType(void *context, MlirBytecodeTypeHandle handle);
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeGetStringSectionValue(
     void *context, MlirBytecodeStringHandle idx, MlirBytecodeBytesRef *result);
 
+#ifdef MLIRBC_VERBOSE_ERROR
 /// Returns failure status post emitting error using same format message as
 /// printf.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeEmitErrorImpl(void *context,
                                                         const char *fmt, ...);
+#endif
 
 //===----------------------------------------------------------------------===//
 // Section parsing entry points.
