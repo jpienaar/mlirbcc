@@ -559,6 +559,17 @@ mlirBytecodeAssociateTypeRange(void *context, MlirBytecodeTypeHandle typeHandle,
   return mlirBytecodeSuccess();
 }
 
+MlirBytecodeStatus mlirBytecodeDialectOpNames(void *context,
+                                              MlirBytecodeSize numOps) {
+  ParsingState *state = context;
+
+  if (state->ops)
+    free(state->ops);
+  state->ops = malloc(numOps * sizeof(*state->ops));
+  memset(state->ops, 0, numOps * sizeof(*state->ops));
+  return mlirBytecodeSuccess();
+}
+
 MlirBytecodeStatus
 mlirBytecodeDialectOpCallBack(void *context, MlirBytecodeOpHandle opHdl,
                               MlirBytecodeDialectHandle dialectHandle,
@@ -566,14 +577,6 @@ mlirBytecodeDialectOpCallBack(void *context, MlirBytecodeOpHandle opHdl,
   ParsingState *state = context;
   mlirBytecodeEmitDebug("\t\tdialect[%d] :: op[%d] = %d", (int)dialectHandle.id,
                         (int)opHdl.id, (int)stringHdl.id);
-  const MlirBytecodeSize total = 100;
-  if (!state->ops) {
-    // FIXME
-    state->ops = malloc(total * sizeof(*state->ops));
-    memset(state->ops, 0, total * sizeof(*state->ops));
-  }
-  if (opHdl.id >= total)
-    return mlirBytecodeUnhandled();
 
   state->ops[opHdl.id] =
       (MlirBytecodeOpRef){.dialect = dialectHandle, .op = stringHdl};

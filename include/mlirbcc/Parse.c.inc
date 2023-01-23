@@ -174,7 +174,11 @@ mlirBytecodeDialectsPush(void *context, MlirBytecodeSize numDialects);
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeDialectCallBack(
     void *context, MlirBytecodeDialectHandle, MlirBytecodeStringHandle);
 
-/// Invoked with opname with its dialect and string handle corresponding to its
+/// Invoked when entering opname association section.
+MLIRBC_DEF MlirBytecodeStatus
+mlirBytecodeDialectOpNames(void *context, MlirBytecodeSize numOps);
+
+/// Invoked per opname with its dialect and string handle corresponding to its
 /// name.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeDialectOpCallBack(
     void *context, MlirBytecodeOpHandle, MlirBytecodeDialectHandle,
@@ -585,13 +589,13 @@ MlirBytecodeStatus mlirBytecodeParseVarInt(void *context,
   }
 
   if (MLIRBC_UNLIKELY(*result == 0)) {
-  uint32_t numBytes = sizeof(*result);
-  const uint8_t *res;
+    uint32_t numBytes = sizeof(*result);
+    const uint8_t *res;
     MlirBytecodeStatus ret =
         mlirBytecodeParseBytes(context, stream, numBytes, &res);
     if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeFailure();
-    uint8_t *ptr = (uint8_t*)(result);
+    uint8_t *ptr = (uint8_t *)(result);
     for (uint32_t i = 0; i < numBytes; ++i) {
       ptr[i] = res[i];
     }
@@ -816,6 +820,23 @@ mlirBytecodeParseDialectSection(void *context,
       return mlirBytecodeFailure();
   }
 
+  const uint8_t *resetPos = stream.pos;
+  // TODO: See if possible to avoid reparsing.
+  MlirBytecodeSize numOps = 0;
+  while (!mlirBytecodeStreamEmpty(&stream)) {
+    uint64_t dialect, numOpNames;
+    mlirBytecodeParseVarInt(context, &stream, &dialect);
+    mlirBytecodeParseVarInt(context, &stream, &numOpNames);
+    ret = mbci_skipVarInts(context, &stream, numOpNames);
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+      return ret;
+    ++numOps;
+  }
+  ret = mlirBytecodeDialectOpNames(context, numOps);
+  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+    return ret;
+  stream.pos = resetPos;
+
   MlirBytecodeOpHandle op = {.id = 0};
   while (!mlirBytecodeStreamEmpty(&stream)) {
     uint64_t dialect, numOpNames;
@@ -826,8 +847,8 @@ mlirBytecodeParseDialectSection(void *context,
     for (uint64_t j = 0; j < numOpNames; ++j) {
       uint64_t opName;
       ret = mlirBytecodeParseVarInt(context, &stream, &opName);
-      if (mlirBytecodeFailed(ret))
-        return mlirBytecodeEmitError(context, "failed to parse op name");
+      assert(mlirBytecodeSucceeded(ret) &&
+             "impossible; would have failed above");
       ret = mlirBytecodeDialectOpCallBack(
           context, op, (MlirBytecodeDialectHandle){.id = dialect},
           (MlirBytecodeStringHandle){.id = opName});
@@ -969,7 +990,7 @@ mlirBytecodeParseAttributeAndTypeSection(void *context,
 MlirBytecodeStatus
 mlirBytecodeParseResourceSection(void *context,
                                  MlirBytecodeParserState *const parserState) {
-  mlirBytecodeEmitDebug("entering resource section");                    
+  mlirBytecodeEmitDebug("entering resource section");
 
   enum MlirBytecodeAsmResourceEntryKind {
     /// A blob of data with an accompanying alignment.
@@ -1048,9 +1069,9 @@ mlirBytecodeParseResourceSection(void *context,
           return mlirBytecodeEmitError(context,
                                        "invalid/missing resource size");
         ret = mbci_alignTo(context, &resPP, alignment);
-        const uint8_t* start = resPP.pos;
+        const uint8_t *start = resPP.pos;
         if (mlirBytecodeFailed(ret) ||
-          mlirBytecodeFailed(mbci_skipBytes(context, &resPP, size) ))
+            mlirBytecodeFailed(mbci_skipBytes(context, &resPP, size)))
           return mlirBytecodeFailure();
         MlirBytecodeBytesRef blob = {.data = start, .length = size};
         ret = mlirBytecodeResourceBlobCallBack(
@@ -1223,8 +1244,8 @@ static MlirBytecodeStatus mbci_parseRegion(void *context,
   if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(context,
                                  "invalid/missing number of values in region");
-  mlirBytecodeEmitDebug("numBlocks = %" PRIu64 " numValues = %" PRIu64, numBlocksRemaining,
-                        numValues);
+  mlirBytecodeEmitDebug("numBlocks = %" PRIu64 " numValues = %" PRIu64,
+                        numBlocksRemaining, numValues);
 
   return mlirBytecodeOperationRegionPush(state, top->op,
                                          top->numBlocksRemaining, numValues);
@@ -1445,11 +1466,11 @@ mlirBytecodeParseIRSection(void *context, MlirBytecodeParserState *parserState,
         return ret;
       continue;
     }
-    mlirBytecodeEmitDebug(
-        "parsing operation (remaining regions: %" PRIu64 " blocks: %" PRIu64" ops: %" PRIu64 ")",
-        mbci_getStackTop(&stack)->numRegionsRemaining,
-        mbci_getStackTop(&stack)->numBlocksRemaining,
-        mbci_getStackTop(&stack)->numOpsRemaining);
+    mlirBytecodeEmitDebug("parsing operation (remaining regions: %" PRIu64
+                          " blocks: %" PRIu64 " ops: %" PRIu64 ")",
+                          mbci_getStackTop(&stack)->numRegionsRemaining,
+                          mbci_getStackTop(&stack)->numBlocksRemaining,
+                          mbci_getStackTop(&stack)->numOpsRemaining);
     ret = mbci_parseOperation(context, parserState, &stream, &stack);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
