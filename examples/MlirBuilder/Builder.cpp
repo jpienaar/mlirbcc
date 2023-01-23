@@ -1032,18 +1032,19 @@ mlirBytecodeResourceDialectGroupEnter(void *context,
   state.resourceHandler = nullptr;
 
   auto dialectOr = state.dialects[dialect.id];
-  Dialect *loadedDialect = dialectOr.getLoadedDialect();
-  if (!loadedDialect) {
+  FailureOr<Dialect *> loadedDialect = state.dialect(dialect);
+  if (MLIRBC_UNLIKELY(failed(loadedDialect))) {
     return mlirBytecodeEmitError(context, "dialect '%s' is unknown",
                                  dialectOr.name);
   }
-  auto parser = dyn_cast<OpAsmDialectInterface>(loadedDialect);
+  auto parser = dyn_cast<OpAsmDialectInterface>(*loadedDialect);
   if (!parser) {
     return mlirBytecodeEmitError(
         context, "unexpected resources for dialect '%s'", dialectOr.name);
   }
 
-  state.resourceHandler = [&](AsmParsedResourceEntry &entry) -> LogicalResult {
+  state.resourceHandler =
+      [&, parser](AsmParsedResourceEntry &entry) -> LogicalResult {
     StringRef key = entry.getKey();
     FailureOr<AsmDialectResourceHandle> handle = parser->declareResource(key);
     if (failed(handle)) {
