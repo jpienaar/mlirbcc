@@ -562,7 +562,7 @@ mlirBytecodeAssociateTypeRange(void *context, MlirBytecodeTypeHandle typeHandle,
 MlirBytecodeStatus mlirBytecodeDialectOpNames(void *context,
                                               MlirBytecodeSize numOps) {
   ParsingState *state = context;
-
+  mlirBytecodeEmitDebug("number of ops %" PRIu64, numOps);
   if (state->ops)
     free(state->ops);
   state->ops = malloc(numOps * sizeof(*state->ops));
