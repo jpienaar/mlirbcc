@@ -254,9 +254,7 @@ struct ParsingState {
   const ParserConfig &config;
 
   /// The resource parser to use for the current resource group.
-  AsmResourceParser *resourceHandler;
-  /// Processing for the resource key.
-  function_ref<LogicalResult(StringRef)> resourceProcessResourceKeyFn;
+  std::function<LogicalResult(AsmParsedResourceEntry &)> resourceHandler;
 
   /// Location to use for reporting errors.
   Location fileLoc;
@@ -552,6 +550,8 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
     return mlirBytecodeEmitError(context, "out of range attribute handle");
 
   OperationState &opState = *opStateHandle;
+  state.attribute(dictHandle)
+      .print(llvm::errs() << __LINE__ << ": " << dictHandle.id);
   DictionaryAttr attr =
       dyn_cast_if_present<DictionaryAttr>(state.attribute(dictHandle));
   if (!attr)
@@ -1031,33 +1031,28 @@ mlirBytecodeResourceDialectGroupEnter(void *context,
   ParsingState &state = *(ParsingState *)context;
   state.resourceHandler = nullptr;
 
-  /*
   auto dialectOr = state.dialects[dialect.id];
-    Dialect *loadedDialect = dialectOr.getLoadedDialect();
-    if (!loadedDialect) {
-      return
-      mlirBytecodeEmitError(context,
-        "dialect '%s' is unknown", dialectOr.name);
-    }
-    state.resourceHandler = dyn_cast<OpAsmDialectInterface>(loadedDialect);
-    if (!state.resourceHandler) {
-      return
-      mlirBytecodeEmitError(context,
-        "unexpected resources for dialect '%s'", dialectOr.name);
-    }
+  Dialect *loadedDialect = dialectOr.getLoadedDialect();
+  if (!loadedDialect) {
+    return mlirBytecodeEmitError(context, "dialect '%s' is unknown",
+                                 dialectOr.name);
+  }
+  auto parser = dyn_cast<OpAsmDialectInterface>(loadedDialect);
+  if (!parser) {
+    return mlirBytecodeEmitError(
+        context, "unexpected resources for dialect '%s'", dialectOr.name);
+  }
 
-  state.resourceProcessResourceKeyFn = [&](StringRef key) -> LogicalResult {
-      FailureOr<AsmDialectResourceHandle> handle =
-          state.resourceHandler->declareResource(key);
-      if (failed(handle)) {
-        return emitError()
-               << "unknown 'resource' key '" << key << "' for dialect '"
-               << dialectOr->name << "'";
-      }
-      state.dialectResources.push_back(*handle);
-      return success();
-    };
-    */
+  state.resourceHandler = [&](AsmParsedResourceEntry &entry) -> LogicalResult {
+    StringRef key = entry.getKey();
+    FailureOr<AsmDialectResourceHandle> handle = parser->declareResource(key);
+    if (failed(handle)) {
+      return state.emitError() << "unknown 'resource' key '" << key
+                               << "' for dialect '" << dialectOr.name << "'";
+    }
+    state.dialectResources.push_back(*handle);
+    return parser->parseResource(entry);
+  };
 
   return mlirBytecodeSuccess();
 }
@@ -1068,14 +1063,17 @@ mlirBytecodeResourceExternalGroupEnter(void *context,
                                        MlirBytecodeSize numResources) {
   mlirBytecodeEmitDebug("entering external resource group");
   ParsingState &state = *(ParsingState *)context;
+  state.resourceHandler = nullptr;
   FailureOr<StringRef> group = state.string(groupKey);
   if (failed(group))
     return mlirBytecodeEmitError(context, "invalid string index");
-  mlirBytecodeEmitDebug("entering external resource group");
 
-  state.resourceHandler = state.config.getResourceParser(*group);
-  mlirBytecodeEmitDebug("entering external resource group");
-  if (!state.resourceHandler) {
+  AsmResourceParser *parser = state.config.getResourceParser(*group);
+  if (parser) {
+    state.resourceHandler = [parser](AsmParsedResourceEntry &entry) {
+      return parser->parseResource(entry);
+    };
+  } else {
     emitWarning(state.fileLoc)
         << "ignoring unknown external resources for '" << *group << "'";
   }
@@ -1095,7 +1093,7 @@ MlirBytecodeStatus mlirBytecodeResourceBlobCallBack(
       keyOr.value(),
       ArrayRef(static_cast<const uint8_t *>(blob.data), blob.length), alignment,
       state);
-  auto ret = state.resourceHandler->parseResource(entry);
+  auto ret = state.resourceHandler(entry);
   return succeeded(ret) ? mlirBytecodeSuccess() : mlirBytecodeFailure();
 }
 
@@ -1109,7 +1107,7 @@ MlirBytecodeStatus mlirBytecodeResourceBoolCallBack(
     return mlirBytecodeFailure();
 
   ParsedResourceEntry entry(keyOr.value(), value, state);
-  auto ret = state.resourceHandler->parseResource(entry);
+  auto ret = state.resourceHandler(entry);
   return succeeded(ret) ? mlirBytecodeSuccess() : mlirBytecodeFailure();
 }
 
@@ -1124,7 +1122,7 @@ mlirBytecodeResourceStringCallBack(void *context,
   if (failed(keyOr))
     return mlirBytecodeFailure();
   ParsedResourceEntry entry(keyOr.value(), value, state);
-  auto ret = state.resourceHandler->parseResource(entry);
+  auto ret = state.resourceHandler(entry);
   return succeeded(ret) ? mlirBytecodeSuccess() : mlirBytecodeFailure();
 }
 

@@ -1444,7 +1444,7 @@ mlirBytecodeParseIRSection(void *context, MlirBytecodeParserState *parserState,
       continue;
     }
     mlirBytecodeEmitDebug(
-        "parsing operation (remaining regions: %" PRIu64 " blocks: %" PRIu64" ops: %"PRIu64")",
+        "parsing operation (remaining regions: %" PRIu64 " blocks: %" PRIu64" ops: %" PRIu64 ")",
         mbci_getStackTop(&stack)->numRegionsRemaining,
         mbci_getStackTop(&stack)->numBlocksRemaining,
         mbci_getStackTop(&stack)->numOpsRemaining);
