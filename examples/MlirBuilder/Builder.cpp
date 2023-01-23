@@ -552,8 +552,6 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
     return mlirBytecodeEmitError(context, "out of range attribute handle");
 
   OperationState &opState = *opStateHandle;
-  state.attribute(dictHandle)
-      .print(llvm::errs() << __LINE__ << ": " << dictHandle.id);
   DictionaryAttr attr =
       dyn_cast_if_present<DictionaryAttr>(state.attribute(dictHandle));
   if (!attr)
