@@ -966,6 +966,7 @@ mlirBytecodeParseAttributeAndTypeSection(void *context,
 MlirBytecodeStatus
 mlirBytecodeParseResourceSection(void *context,
                                  MlirBytecodeParserState *const parserState) {
+  mlirBytecodeEmitDebug("entering resource section");                    
 
   enum MlirBytecodeAsmResourceEntryKind {
     /// A blob of data with an accompanying alignment.
@@ -992,8 +993,6 @@ mlirBytecodeParseResourceSection(void *context,
   if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
     return mlirBytecodeEmitError(
         context, "invalid/missing number of external resource groups");
-  if (!numExternalResourceGroups)
-    return mlirBytecodeSuccess();
 
   uint64_t i = 0;
   while (!mlirBytecodeStreamEmpty(&offsetStream)) {
