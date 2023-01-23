@@ -57,22 +57,6 @@ struct MlirBytecodeBytesRef {
 };
 typedef struct MlirBytecodeBytesRef MlirBytecodeBytesRef;
 
-struct MlirBytecodeHandlesRef {
-  // Pointer to the start memory address.
-  const MlirBytecodeHandle *handles;
-  // Length of the fragment.
-  MlirBytecodeSize length;
-};
-typedef struct MlirBytecodeHandlesRef MlirBytecodeHandlesRef;
-
-struct MlirBytecodeSizesRef {
-  // Pointer to the start memory address.
-  const MlirBytecodeSize *sizes;
-  // Length of the fragment.
-  MlirBytecodeSize length;
-};
-typedef struct MlirBytecodeSizesRef MlirBytecodeSizesRef;
-
 struct MlirBytecodeOpRef {
   // Handle to op dialect.
   MlirBytecodeDialectHandle dialect;
