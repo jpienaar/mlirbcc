@@ -1384,9 +1384,9 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
   // Completed parsing of op proper, regions potentially remaining.
   MlirBytecodeOperationHandle opHandle;
   ret = mlirBytecodeOperationStatePop(context, cur->opState, &opHandle);
-  cur->op = opHandle;
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
+  cur->op = opHandle;
 
   if (encodingMask & kHasInlineRegions)
     return mbci_mlirIRSectionStackPush(context, stack);
