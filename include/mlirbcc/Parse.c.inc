@@ -18,10 +18,6 @@
 // Callbacks/functions to be implemented in instantiation accept an opaque
 // pointer as first argument that gets propagated during parsing and can be used
 // by instantiation for additional/parse local state capture.
-//
-// Convention followed in this file is to prefix implementation details with
-// mbci_. But there is more to do to differentiate between internal and
-// user-facing methods.
 
 // TODO: Support for big-endian architectures.
 
@@ -242,93 +238,6 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeEmitErrorImpl(void *context,
 #endif
 
 //===----------------------------------------------------------------------===//
-// Section parsing entry points.
-
-/// Iterators over attributes and types, calling MlirBytecodeAttrCallBack and
-/// MlirBytecodeTypeCallBack upon encountering Attribute or Type respectively.
-/// Returns whether failed.
-static MlirBytecodeStatus
-mlirBytecodeParseAttributeAndTypeSection(void *context,
-                                         MlirBytecodeParserState *parserState);
-
-/// Parses the dialect section, invoking MlirBytecodeDialectCallBack upon
-/// dialect encountered and MlirBytecodeDialectOpCallBack per operation type in
-/// dialect. Returns whether failed.
-static MlirBytecodeStatus
-mlirBytecodeParseDialectSection(void *context,
-                                MlirBytecodeParserState *parserState);
-
-/// Parse IR section and returns populated block. The block args, operation and
-/// region callback are invoked during bytecode in-order walk. Additionally
-/// allows for passing in an opaque state.
-///
-/// The IR section parsing follows the nesting order:
-///   op ->* regions ->* blocks
-/// The caller is required to keep track of when all operations/blocks in
-/// block/region have been processed and so parsing resumes at parent level.
-/// Returns whether failed.
-static MlirBytecodeStatus
-mlirBytecodeParseIRSection(void *context, MlirBytecodeParserState *parserState,
-                           void *retBlock);
-
-/// Parse the resource section, calling MlirBytecodeResourceCallBack upon
-/// resources encountered. Returns whether failed.
-static MlirBytecodeStatus
-mlirBytecodeParseResourceSection(void *context,
-                                 MlirBytecodeParserState *parserState);
-
-//===----------------------------------------------------------------------===//
-// Dialect parsing utility methods.
-
-/// Parse the next handle on the stream and increment stream.
-static MlirBytecodeStatus mlirBytecodeParseHandle(void *context,
-                                                  MlirBytecodeStream *stream,
-                                                  MlirBytecodeHandle *result);
-
-/// Skips the next n handles.
-static MlirBytecodeStatus
-mlirBytecodeSkipHandles(void *context, MlirBytecodeStream *stream, uint64_t n);
-
-/// Parse byte from stream.
-static MlirBytecodeStatus
-mlirBytecodeParseByte(void *context, MlirBytecodeStream *stream, uint8_t *val);
-
-/// Parse n bytes from stream.
-static MlirBytecodeStatus mlirBytecodeParseBytes(void *context,
-                                                 MlirBytecodeStream *stream,
-                                                 size_t n, const uint8_t **val);
-
-/// Parse uint64 on the stream and increment stream.
-static MlirBytecodeStatus mlirBytecodeParseVarInt(void *context,
-                                                  MlirBytecodeStream *stream,
-                                                  uint64_t *result);
-
-/// Parse int64 on the stream and increment stream.
-static MlirBytecodeStatus
-mlirBytecodeParseSignedVarInt(void *context, MlirBytecodeStream *stream,
-                              int64_t *result);
-
-/// Parse a variable length encoded integer whose low bit is used to encode a
-/// flag, i.e: `(integerValue << 1) | (flag ? 1 : 0)`.
-static MlirBytecodeStatus
-mlirBytecodeParseVarIntWithFlag(void *context, MlirBytecodeStream *stream,
-                                uint64_t *result, bool *flag);
-
-/// Parse a null-terminated string.
-static MlirBytecodeStatus
-mlirBytecodeParseNullTerminatedString(void *context, MlirBytecodeStream *stream,
-                                      MlirBytecodeBytesRef *str);
-
-//===----------------------------------------------------------------------===//
-// MlirBytecodeStream.
-
-/// Create a stream from a range of bytes.
-static MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes);
-
-/// Return whether stream is empty.
-static bool mlirBytecodeStreamEmpty(MlirBytecodeStream *stream);
-
-//===----------------------------------------------------------------------===//
 // MlirBytecodeStatus.
 
 // Value representing the status of parsing. Status is either a success, failure
@@ -393,6 +302,93 @@ extern void mlirBytecodeEmitDebugImpl(const char *file, int line,
 //===----------------------------------------------------------------------===//
 // Implementation/implementation details.
 
+//===----------------------------------------------------------------------===//
+// Section parsing entry points.
+
+/// Iterators over attributes and types, calling MlirBytecodeAttrCallBack and
+/// MlirBytecodeTypeCallBack upon encountering Attribute or Type respectively.
+/// Returns whether failed.
+static MlirBytecodeStatus
+mlirBytecodeParseAttributeAndTypeSection(void *context,
+                                         MlirBytecodeParserState *parserState);
+
+/// Parses the dialect section, invoking MlirBytecodeDialectCallBack upon
+/// dialect encountered and MlirBytecodeDialectOpCallBack per operation type in
+/// dialect. Returns whether failed.
+static MlirBytecodeStatus
+mlirBytecodeParseDialectSection(void *context,
+                                MlirBytecodeParserState *parserState);
+
+/// Parse IR section and returns populated block. The block args, operation and
+/// region callback are invoked during bytecode in-order walk. Additionally
+/// allows for passing in an opaque state.
+///
+/// The IR section parsing follows the nesting order:
+///   op ->* regions ->* blocks
+/// The caller is required to keep track of when all operations/blocks in
+/// block/region have been processed and so parsing resumes at parent level.
+/// Returns whether failed.
+static MlirBytecodeStatus
+mlirBytecodeParseIRSection(void *context, MlirBytecodeParserState *parserState,
+                           void *retBlock);
+
+/// Parse the resource section, calling MlirBytecodeResourceCallBack upon
+/// resources encountered. Returns whether failed.
+static MlirBytecodeStatus
+mlirBytecodeParseResourceSection(void *context,
+                                 MlirBytecodeParserState *parserState);
+
+//===----------------------------------------------------------------------===//
+// Parsing utility methods.
+
+/// Parse the next handle on the stream and increment stream.
+static MlirBytecodeStatus mlirBytecodeParseHandle(void *context,
+                                                  MlirBytecodeStream *stream,
+                                                  MlirBytecodeHandle *result);
+
+/// Skips the next n handles.
+static MlirBytecodeStatus
+mlirBytecodeSkipHandles(void *context, MlirBytecodeStream *stream, uint64_t n);
+
+/// Parse byte from stream.
+static MlirBytecodeStatus
+mlirBytecodeParseByte(void *context, MlirBytecodeStream *stream, uint8_t *val);
+
+/// Parse n bytes from stream.
+static MlirBytecodeStatus mlirBytecodeParseBytes(void *context,
+                                                 MlirBytecodeStream *stream,
+                                                 size_t n, const uint8_t **val);
+
+/// Parse uint64 on the stream and increment stream.
+static MlirBytecodeStatus mlirBytecodeParseVarInt(void *context,
+                                                  MlirBytecodeStream *stream,
+                                                  uint64_t *result);
+
+/// Parse int64 on the stream and increment stream.
+static MlirBytecodeStatus
+mlirBytecodeParseSignedVarInt(void *context, MlirBytecodeStream *stream,
+                              int64_t *result);
+
+/// Parse a variable length encoded integer whose low bit is used to encode a
+/// flag, i.e: `(integerValue << 1) | (flag ? 1 : 0)`.
+static MlirBytecodeStatus
+mlirBytecodeParseVarIntWithFlag(void *context, MlirBytecodeStream *stream,
+                                uint64_t *result, bool *flag);
+
+/// Parse a null-terminated string.
+static MlirBytecodeStatus
+mlirBytecodeParseNullTerminatedString(void *context, MlirBytecodeStream *stream,
+                                      MlirBytecodeBytesRef *str);
+
+//===----------------------------------------------------------------------===//
+// MlirBytecodeStream.
+
+/// Create a stream from a range of bytes.
+static MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes);
+
+/// Return whether stream is empty.
+static bool mlirBytecodeStreamEmpty(MlirBytecodeStream *stream);
+
 // Macros to allow capturing file and line from which invoked.
 #define mlirBytecodeEmitDebug(...)                                             \
   mlirBytecodeEmitDebugImpl(__FILE__, __LINE__, __VA_ARGS__)
@@ -411,6 +407,20 @@ extern void mlirBytecodeEmitDebugImpl(const char *file, int line,
 #define MLIRBC_LIKELY(EXPR) (EXPR)
 #define MLIRBC_UNLIKELY(EXPR) (EXPR)
 #endif
+
+// MLIRBC_ATTRIBUTE_NOINLINE - On compilers where we have a directive to do so,
+// mark a method "not for inlining".
+#if __has_attribute(noinline)
+#define MLIRBC_ATTRIBUTE_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define MLIRBC_ATTRIBUTE_NOINLINE __declspec(noinline)
+#else
+#define MLIRBC_ATTRIBUTE_NOINLINE
+#endif
+
+// Convention followed in this file is to prefix implementation details with
+// mbci_. But there is more to do to differentiate between internal and
+// user-facing methods.
 
 //===----------------------------------------------------------------------===//
 // Bytecode constants.
@@ -506,10 +516,6 @@ void mlirBytecodeEmitDebugImpl(const char *file, int line, const char *fmt,
 }
 #endif
 
-//-----
-// Base parsing primitives.
-//=====
-
 MlirBytecodeStream mlirBytecodeStreamCreate(MlirBytecodeBytesRef bytes) {
   MlirBytecodeStream ret;
   ret.start = ret.pos = bytes.data;
@@ -575,6 +581,29 @@ mlirBytecodeSkipHandles(void *context, MlirBytecodeStream *stream, uint64_t n) {
   return mbci_skipVarInts(context, stream, n);
 }
 
+MLIRBC_ATTRIBUTE_NOINLINE MlirBytecodeStatus mbci_parseVarInts(
+    void *context, MlirBytecodeStream *stream, uint8_t head, uint64_t *result) {
+
+  uint32_t numBytes = __builtin_ctz(head);
+  assert(numBytes > 0 && numBytes <= 7 &&
+         "unexpected number of trailing zeros in varint encoding");
+
+  const uint8_t *res;
+  MlirBytecodeStatus ret =
+      mlirBytecodeParseBytes(context, stream, numBytes, &res);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+    return mlirBytecodeFailure();
+  uint8_t *ptr = (uint8_t *)(result) + 1;
+  for (uint32_t i = 0; i < numBytes; ++i) {
+    ptr[i] = res[i];
+  }
+
+  // Shift out the low-order bits that were used to mark how the value was
+  // encoded.
+  *result >>= (numBytes + 1);
+  return ret;
+}
+
 MlirBytecodeStatus mlirBytecodeParseVarInt(void *context,
                                            MlirBytecodeStream *stream,
                                            uint64_t *result) {
@@ -603,22 +632,7 @@ MlirBytecodeStatus mlirBytecodeParseVarInt(void *context,
     }
     return mlirBytecodeSuccess();
   }
-
-  uint32_t numBytes = __builtin_ctz(head);
-  const uint8_t *res;
-  MlirBytecodeStatus ret =
-      mlirBytecodeParseBytes(context, stream, numBytes, &res);
-  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
-    return mlirBytecodeFailure();
-  uint8_t *ptr = (uint8_t *)(result) + 1;
-  for (uint32_t i = 0; i < numBytes; ++i) {
-    ptr[i] = res[i];
-  }
-
-  // Shift out the low-order bits that were used to mark how the value was
-  // encoded.
-  *result >>= (numBytes + 1);
-  return ret;
+  return mbci_parseVarInts(context, stream, head, result);
 }
 
 MlirBytecodeStatus mlirBytecodeParseVarIntWithFlag(void *context,
@@ -668,8 +682,11 @@ mbci_alignTo(void *context, MlirBytecodeStream *stream, uint32_t alignment) {
     }
   }
 
-  // TODO: Check that the current data pointer is actually at the expected
-  // alignment.
+  if (MLIRBC_UNLIKELY((uint64_t)(stream->pos) % alignment != 0))
+    return mlirBytecodeEmitError(
+        context,
+        "expected data iterator aligned to %d, but got pointer '0x" PRIx64 "'",
+        alignment, (void *)stream->pos);
   return mlirBytecodeSuccess();
 }
 
