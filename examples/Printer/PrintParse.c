@@ -32,7 +32,7 @@ typedef struct MlirBytecodeOperationState MlirBytecodeOperation;
 // Dialect attribute and types parsing hooks.
 #include "mlirbcc/DialectBytecodeReader.c.inc"
 // Dialects.
-#include "mlirbcc/BuiltinParse.c.inc"
+#include "BuiltinParse.c.inc"
 
 // Example that prints as one parses.
 
