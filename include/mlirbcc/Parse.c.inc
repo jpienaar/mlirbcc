@@ -703,7 +703,7 @@ mbci_parseSections(void *context, MlirBytecodeStream *stream,
     return ret;
   uint8_t sectionID = byte & 0x7f;
 
-  mlirBytecodeEmitDebug("parsing section %d of %lld", sectionID, length);
+  mlirBytecodeEmitDebug("parsing section %d of size %" PRIu64, sectionID, length);
   if (MLIRBC_UNLIKELY(sectionID >= mbci_kNumSections))
     return mlirBytecodeEmitError(context, "invalid section ID: %d", sectionID);
   if (MLIRBC_UNLIKELY(sectionData[sectionID].data != NULL)) {
@@ -1522,7 +1522,7 @@ mlirBytecodePopulateParserState(void *context,
       mlirBytecodeFailed(
           mlirBytecodeParseNullTerminatedString(context, &stream, &producer)))
     return mlirBytecodeEmitError(context, "invalid version or producer"), ret;
-  mlirBytecodeEmitDebug("bytecode producer: %s\n", producer.data);
+  mlirBytecodeEmitDebug("bytecode producer: %s", producer.data);
 
   while (!mlirBytecodeStreamEmpty(&stream)) {
     // Read the next section from the bytecode.
@@ -1553,17 +1553,23 @@ MlirBytecodeStatus mlirBytecodeParse(void *context,
     return mlirBytecodeSuccess();
 
   // Process the string section first.
-  if (!mlirBytecodeSucceeded(mlirBytecodeForEachString(context, parserState)) ||
-      // Process the dialect section.
-      !mlirBytecodeSucceeded(
-          mlirBytecodeParseDialectSection(context, parserState)) ||
-      // Process the resource section if present.
-      !mlirBytecodeSucceeded(
-          mlirBytecodeParseResourceSection(context, parserState)) ||
-      // Process the attribute and type section.
-      !mlirBytecodeSucceeded(
-          mlirBytecodeParseAttributeAndTypeSection(context, parserState)))
-    return mlirBytecodeFailure();
+  MlirBytecodeStatus ret = mlirBytecodeForEachString(context, parserState);
+
+  if (!mlirBytecodeSucceeded(ret))
+    return ret;
+
+  // Process the dialect section.
+  ret = mlirBytecodeParseDialectSection(context, parserState);
+  if (!mlirBytecodeSucceeded(ret))
+    return ret;
+  // Process the resource section if present.
+  ret = mlirBytecodeParseResourceSection(context, parserState);
+  if (!mlirBytecodeSucceeded(ret))
+    return ret;
+  // Process the attribute and type section.
+  ret = mlirBytecodeParseAttributeAndTypeSection(context, parserState);
+  if (!mlirBytecodeSucceeded(ret))
+    return ret;
 
   // Finally, process the IR section.
   return mlirBytecodeParseIRSection(context, parserState, retBlock);
