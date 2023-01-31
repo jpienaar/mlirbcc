@@ -669,8 +669,6 @@ MlirBytecodeStatus
 mlirBytecodeOperationRegionPush(void *context,
                                 MlirBytecodeOperationHandle opHandle,
                                 size_t numBlocks, size_t numValues) {
-  mlirBytecodeEmitDebug("region push blocks=%d values=%d", (int)numBlocks,
-                        (int)numValues);
   ParsingState &state = *(ParsingState *)context;
 
   // If the region is empty, there is nothing else to do.
