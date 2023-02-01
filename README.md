@@ -2,8 +2,8 @@
 
 This is a standalone, pure C, event-driven parser for MLIR bytecode.
 
-Currently this is incomplete and there is duplication with C++ code, but
-goal is to push this to further state where that duplication can be removed.
+Basically the example Builder would replace BytecodeReader.cpp and Printer one is just a standalone example.
+For dialect attributes & types, I'm still unsure the amount of hooks needed for in place parsing in general is really high to the point where just generating them seems better.
 
 This project is under active development/being bootstrapped. It is being
 developed as a part of MLIR project and post iteration out of tree it
