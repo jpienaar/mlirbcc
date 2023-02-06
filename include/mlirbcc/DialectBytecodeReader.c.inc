@@ -12,7 +12,7 @@
 #ifndef MLIRBC_DIALECTBYTECODEREADER_H
 #define MLIRBC_DIALECTBYTECODEREADER_H
 
-#include "mlirbcc/BytecodeTypes.h"
+#include "mlir/Bytecode/BytecodeTypes.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
@@ -115,8 +115,11 @@ mlirBytecodeDialectReaderReadVarInt(MlirBytecodeDialectReader *reader,
 MlirBytecodeStatus
 mlirBytecodeDialectReaderReadSignedVarInt(MlirBytecodeDialectReader *reader,
                                           int64_t *result) {
-  return mlirBytecodeParseSignedVarInt(reader->context, reader->stream,
-                                       result);
+  uint64_t unsignedResult;
+  MlirBytecodeStatus ret = mlirBytecodeParseSignedVarInt(reader->context, reader->stream,
+	  &unsignedResult);
+  *result = (int64_t)unsignedResult;
+  return ret;
 }
 
 MlirBytecodeStatus mlirBytecodeDialectReaderReadAPIntWithKnownWidth(
@@ -140,7 +143,7 @@ MlirBytecodeStatus mlirBytecodeDialectReaderReadAPIntWithKnownWidth(
   // Large values up to 64 bits are encoded using a single varint.
   if (bitWidth <= 64) {
     ret = mlirBytecodeParseSignedVarInt(reader->context, reader->stream,
-                                        (int64_t *)&result->U.value);
+                                        &result->U.value);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
     return mlirBytecodeSuccess();
@@ -165,7 +168,7 @@ MlirBytecodeStatus mlirBytecodeDialectReaderReadAPIntWithKnownWidth(
 
   for (uint64_t i = 0; i < numActiveWords; ++i) {
     ret = mlirBytecodeParseSignedVarInt(reader->context, reader->stream,
-                                        (int64_t *)&result->U.data[i]);
+                                        &result->U.data[i]);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
