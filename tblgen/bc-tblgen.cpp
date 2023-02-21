@@ -64,13 +64,15 @@ public:
   // Returns whether successfully emitted attribute defs.
   bool emitParse(StringRef kind, Record &x);
 
-  // Emits header for parse method.
-  bool emitParseHeader(StringRef kind, Record &x);
-
   // Emits dispatch table.
   bool emitDispatch(StringRef kind, ArrayRef<Record *> vec);
 
 private:
+  // Emits header for parse method.
+  bool emitParseHelper(StringRef kind, StringRef returnType, StringRef builder,
+                       ArrayRef<Init *> args, ArrayRef<std::string> argNames,
+                       mlir::raw_indented_ostream &ios);
+
   StringRef dialectName;
   std::string topStr, bottomStr;
 };
@@ -183,36 +185,42 @@ bool Generator::emitDispatch(StringRef kind, ArrayRef<Record *> vec) {
   return false;
 }
 
-bool Generator::emitParseHeader(StringRef kind, Record &attr) {
+bool Generator::emitParse(StringRef kind, Record &attr) {
   char const *head =
       R"(static {0} read{1}(MlirContext* context, DialectBytecodeReader &reader) )";
   raw_string_ostream os(bottomStr);
   mlir::raw_indented_ostream ios(os);
   std::string returnType = getCType(&attr);
   ios << formatv(head, returnType, attr.getName());
-  return false;
+  DagInit *members = attr.getValueAsDag("members");
+  SmallVector<std::string> argNames =
+      llvm::to_vector(map_range(members->getArgNames(), [](StringInit *init) {
+        return init->getAsUnquotedString();
+      }));
+  StringRef builder = attr.getValueAsString("cBuilder");
+  return emitParseHelper(kind, returnType, builder, members->getArgs(),
+                         argNames, ios);
 }
 
-bool Generator::emitParse(StringRef kind, Record &attr) {
-  DagInit *members = attr.getValueAsDag("members");
-  std::string returnType = getCType(&attr);
-  raw_string_ostream os(bottomStr);
-  mlir::raw_indented_ostream ios(os);
+bool Generator::emitParseHelper(StringRef kind, StringRef returnType,
+                                StringRef builder, ArrayRef<Init *> args,
+                                ArrayRef<std::string> argNames,
+                                mlir::raw_indented_ostream &ios) {
   auto funScope = ios.scope("{\n", "}\n\n");
+  llvm::errs() << returnType << "<<\n";
 
   // Parses for trivial constructors handled in dispatch.
-  if (!members->getNumArgs()) {
-    ios << formatv("return {0}::get(context);\n", getCType(&attr));
+  if (args.empty()) {
+    ios << formatv("return {0}::get(context);\n", returnType);
     return false;
   }
 
   // Print decls.
   StringRef lastCType = "";
-  for (auto it : zip(members->getArgs(), members->getArgNames())) {
+  for (auto it : zip(args, argNames)) {
     DefInit *first = dyn_cast<DefInit>(std::get<0>(it));
     if (!first) {
-      return reportError("Unexpected type for " +
-                         std::get<1>(it)->getAsString());
+      return reportError("Unexpected type for " + std::get<1>(it));
     }
     Record *def = first->getDef();
 
@@ -224,22 +232,37 @@ bool Generator::emitParse(StringRef kind, Record &attr) {
         ios << ";\n";
       ios << cType << " ";
     }
-    ios << std::get<1>(it)->getAsUnquotedString();
+    ios << std::get<1>(it);
     lastCType = cType;
   }
   ios << ";\n";
 
-  auto listHelperName = [](StringInit *name) {
-    return formatv("read{0}", capitalize(name->getAsUnquotedString()));
+  auto listHelperName = [](StringRef name) {
+    return formatv("read{0}", capitalize(name));
   };
 
   // Emit list helper functions.
-  for (auto it : zip(members->getArgs(), members->getArgNames())) {
+  for (auto it : zip(args, argNames)) {
     Record *attr = cast<DefInit>(std::get<0>(it))->getDef();
     if (!attr->isSubClassOf("Array"))
       continue;
-    // TODO: Should be recursive call.
-    ios << "// TODO: " << listHelperName(std::get<1>(it)) << "\n";
+
+    // TODO: Dedupe readers.
+    Record *def = attr->getValueAsDef("elemT");
+    std::string returnType = getCType(def);
+    ios << "auto " << listHelperName(std::get<1>(it))
+        << " = [&]() -> FailureOr<" << returnType << "> ";
+    SmallVector<Init *> args;
+    SmallVector<std::string> argNames;
+    if (def->isSubClassOf("Array")) {
+      ios << "/* UNIMPLEMENTED */";
+    } else {
+      args = {def->getDefInit()};
+      argNames = {"temp"};
+    }
+    StringRef builder = attr->getValueAsString("cBuilder");
+    if (emitParseHelper(kind, returnType, builder, args, argNames, ios))
+      return true;
   }
 
   // Print parse conditional.
@@ -248,8 +271,8 @@ bool Generator::emitParse(StringRef kind, Record &attr) {
     auto parenScope = ios.scope("(", ") {");
     ios.indent();
 
-    auto parsedArgs = llvm::to_vector(
-        make_filter_range(members->getArgs(), [](Init *const attr) {
+    auto parsedArgs =
+        llvm::to_vector(make_filter_range(args, [](Init *const attr) {
           Record *def = cast<DefInit>(attr)->getDef();
           if (def->isSubClassOf("Array")) {
             def = def->getValueAsDef("elemT");
@@ -258,8 +281,8 @@ bool Generator::emitParse(StringRef kind, Record &attr) {
         }));
 
     interleave(
-        zip(parsedArgs, members->getArgNames()),
-        [&](auto it) {
+        zip(parsedArgs, argNames),
+        [&](std::tuple<llvm::Init *&, const std::string &> it) {
           Record *attr = cast<DefInit>(std::get<0>(it))->getDef();
           std::string parser;
           if (attr->isSubClassOf("Array")) {
@@ -271,33 +294,28 @@ bool Generator::emitParse(StringRef kind, Record &attr) {
             parser = attr->getValueAsString("cParser").str();
           }
           std::string type = getCType(attr);
-          ios << formatv(parser.c_str(), "reader", type,
-                         std::get<1>(it)->getAsUnquotedString())
-              << ")";
+          ios << formatv(parser.c_str(), "reader", type, std::get<1>(it));
         },
         [&]() { ios << " &&\n"; });
   }
 
-  StringRef postProcess = attr.getValueAsString("postProcess").rtrim();
-  if (!postProcess.empty()) {
-    ios << "\n";
-    ios.printReindented(postProcess);
-  }
-
+  //
+  auto passedArgs = llvm::to_vector(make_filter_range(
+      argNames, [](StringRef str) { return !str.starts_with("_"); }));
+  std::string argStr;
+  raw_string_ostream argStream(argStr);
+  interleaveComma(passedArgs, argStream,
+                  [&](const std::string &str) { argStream << str; });
   // Return the invoked constructor.
-  ios << formatv("\nreturn {0}::get(", returnType);
-
-  auto passedArgs = llvm::to_vector(
-      make_filter_range(members->getArgNames(), [](StringInit *const str) {
-        return !StringRef(str->getAsUnquotedString()).starts_with("_");
-      }));
+  ios << "\nreturn "
+      << formatv(builder.str().c_str(), returnType, argStream.str())
+      << ";\n";
   ios.unindent();
-  interleaveComma(passedArgs, ios,
-                  [&](StringInit *str) { ios << str->getAsUnquotedString(); });
-  ios << ");\n";
 
   // TODO: Emit error in debug.
-  // ios << "}\nreturn mlirBytecodeEmitError(\"invalid " << attr.getName()
+  // This assumes the result types in error case can always be empty
+  // constructed. ios << "}\nreturn mlirBytecodeEmitError(\"invalid " <<
+  // attr.getName()
   //     << "\");\n";
   ios << "}\nreturn " << returnType << "();\n";
 
@@ -343,8 +361,7 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
     std::vector<Record *> &vec = it.second.attr;
     std::sort(vec.begin(), vec.end(), compEnum);
     for (auto kt : vec)
-      if (gen.emitParseHeader("attribute", *kt) ||
-          gen.emitParse("attribute", *kt))
+      if (gen.emitParse("attribute", *kt))
         return true;
     gen.emitDispatch("attribute", vec);
   }
@@ -354,7 +371,7 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
     std::vector<Record *> &vec = it.second.type;
     std::sort(vec.begin(), vec.end(), compEnum);
     for (auto kt : vec)
-      if (gen.emitParseHeader("type", *kt) || gen.emitParse("type", *kt))
+      if (gen.emitParse("type", *kt))
         return true;
     gen.emitDispatch("type", vec);
   }
