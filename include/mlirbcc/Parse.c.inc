@@ -885,6 +885,7 @@ mlirBytecodeParseAttributeAndTypeSection(void *context,
                                          MlirBytecodeParserState *parserState) {
   const MlirBytecodeBytesRef offsetSection =
       mbci_getSection(parserState, mbci_kAttrTypeOffset);
+      offsetSection.
   MlirBytecodeStream offsetStream =
       mbci_populateStreamForSection(offsetSection);
   const MlirBytecodeBytesRef atSection =

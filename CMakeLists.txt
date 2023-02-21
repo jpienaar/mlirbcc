@@ -48,7 +48,7 @@ if(IS_DIRECTORY ${MLIR_DIR})
     link_directories(${LLVM_BUILD_LIBRARY_DIR})
     add_definitions(${LLVM_DEFINITIONS})
 
-    # add_subdirectory(tblgen)
+    add_subdirectory(tblgen)
 else()
     message(STATUS "Building without MLIR (MLIR_DIR `${MLIR_DIR}` not directory)")
     # Simple sanitizer support without LLVM/repeating HandleLLVMOptions that

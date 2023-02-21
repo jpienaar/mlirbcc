@@ -63,8 +63,11 @@ public:
 
   // Returns whether successfully emitted attribute defs.
   bool emitParse(StringRef kind, Record &x);
-  bool emitCreate(StringRef kind, Record &x);
 
+  // Emits header for parse method.
+  bool emitParseHeader(StringRef kind, Record &x);
+
+  // Emits dispatch table.
   bool emitDispatch(StringRef kind, ArrayRef<Record *> vec);
 
 private:
@@ -139,45 +142,69 @@ static std::string capitalize(StringRef str) {
   return ((Twine)toUpper(str[0]) + str.drop_front()).str();
 }
 
+std::string getCType(Record *def) {
+  std::string format = "{0}";
+  if (def->isSubClassOf("Array")) {
+    def = def->getValueAsDef("elemT");
+    format = "SmallVector<{0}>";
+  }
+
+  StringRef cType = def->getValueAsString("cType");
+  if (cType.empty())
+    return formatv(format.c_str(), def->getName().str());
+  return formatv(format.c_str(), cType.str());
+}
+
 bool Generator::emitDispatch(StringRef kind, ArrayRef<Record *> vec) {
   raw_string_ostream sos(bottomStr);
   mlir::raw_indented_ostream os(sos);
-  char const *head = R"(MlirBytecodeStatus
-mlirBytecodeParse{0}{1}(void *state, MlirBytecodeDialectHandle dialectHandle,
-    MlirBytecode{1}Handle {2}Handle, size_t total, bool hasCustom,
-    MlirBytecodeBytesRef str) )";
-  os << formatv(head, dialectName, capitalize(kind), kind);
-  auto funScope = os.scope("{\n", "}\n\n");
+  char const *head = R"({1} {0}DialectBytecodeInterface::read{1}(
+      DialectBytecodeReader &reader)";
+  os << formatv(head, dialectName, capitalize(kind));
+  auto funScope = os.scope(" {\n", "}\n\n");
 
-  os << "if (!hasCustom)\n  return mlirBytecodeUnhandled();\n";
-  os << "MlirBytecodeStream stream = mlirBytecodeStreamCreate(str);\n";
-  os << "MlirBytecodeStream *pp = &stream;\n";
-  os << "MlirBytecodeHandle kind;\n";
-  os << "if (mlirBytecodeFailed(mlirBytecodeGetNextHandle(pp, "
-        "&kind)))\n  return mlirBytecodeFailure();\n";
+  os << "uint64_t kind;\n";
+  os << "if (failed(dialectReader.readVarInt(kind)))\n"
+     << "  return " << capitalize(kind) << "();\n";
   os << "switch (kind) ";
   {
     auto switchScope = os.scope("{\n", "}\n");
     for (auto it : vec) {
-      os << formatv(
-          "case /* {0} */ {1}:\n  return parse{0}(state, {2}Handle, pp);\n",
-          it->getName(), it->getValueAsInt("enum"), kind);
+      os << formatv("case /* {0} */ {1}:\n  return read{0}(dialectReader);\n",
+                    it->getName(), it->getValueAsInt("enum"));
     }
-    os << "default:\n  return mlirBytecodeUnhandled();\n";
+    os << "default:\n"
+       << "  reader.emitError() << \"unknown builtin attribute code: \" "
+       << "<< kind;\n"
+       << "  return " << capitalize(kind) << "();\n";
   }
   os << "\nreturn mlirBytecodeSuccess();\n";
 
   return false;
 }
 
-bool Generator::emitParse(StringRef kind, Record &attr) {
+bool Generator::emitParseHeader(StringRef kind, Record &attr) {
+  char const *head =
+      R"(static {0} read{1}(MlirContext* context, DialectBytecodeReader &reader) )";
   raw_string_ostream os(bottomStr);
-  char const *head = R"(static MlirBytecodeStatus parse{0}(void *bcUserState,
-    MlirBytecode{1}Handle bc{1}Handle, MlirBytecodeStream *bcStream) )";
   mlir::raw_indented_ostream ios(os);
-  ios << formatv(head, attr.getName(), capitalize(kind));
-  auto funScope = ios.scope("{\n", "}\n\n");
+  std::string returnType = getCType(&attr);
+  ios << formatv(head, returnType, attr.getName());
+  return false;
+}
+
+bool Generator::emitParse(StringRef kind, Record &attr) {
   DagInit *members = attr.getValueAsDag("members");
+  std::string returnType = getCType(&attr);
+  raw_string_ostream os(bottomStr);
+  mlir::raw_indented_ostream ios(os);
+  auto funScope = ios.scope("{\n", "}\n\n");
+
+  // Parses for trivial constructors handled in dispatch.
+  if (!members->getNumArgs()) {
+    ios << formatv("return {0}::get(context);\n", getCType(&attr));
+    return false;
+  }
 
   // Print decls.
   StringRef lastCType = "";
@@ -188,7 +215,8 @@ bool Generator::emitParse(StringRef kind, Record &attr) {
                          std::get<1>(it)->getAsString());
     }
     Record *def = first->getDef();
-    StringRef cType = def->getValueAsString("cType");
+
+    std::string cType = getCType(def);
     if (lastCType == cType) {
       ios << ", ";
     } else {
@@ -199,29 +227,51 @@ bool Generator::emitParse(StringRef kind, Record &attr) {
     ios << std::get<1>(it)->getAsUnquotedString();
     lastCType = cType;
   }
+  ios << ";\n";
 
-  if (members->getNumArgs() > 0) {
-    ios << ";\n";
+  auto listHelperName = [](StringInit *name) {
+    return formatv("read{0}", capitalize(name->getAsUnquotedString()));
+  };
 
+  // Emit list helper functions.
+  for (auto it : zip(members->getArgs(), members->getArgNames())) {
+    Record *attr = cast<DefInit>(std::get<0>(it))->getDef();
+    if (!attr->isSubClassOf("Array"))
+      continue;
+    // TODO: Should be recursive call.
+    ios << "// TODO: " << listHelperName(std::get<1>(it)) << "\n";
+  }
+
+  // Print parse conditional.
+  {
     ios << "if ";
     auto parenScope = ios.scope("(", ") {");
     ios.indent();
 
     auto parsedArgs = llvm::to_vector(
         make_filter_range(members->getArgs(), [](Init *const attr) {
-          return !cast<DefInit>(attr)
-                      ->getDef()
-                      ->getValueAsString("cParser")
-                      .empty();
+          Record *def = cast<DefInit>(attr)->getDef();
+          if (def->isSubClassOf("Array")) {
+            def = def->getValueAsDef("elemT");
+          }
+          return !def->getValueAsString("cParser").empty();
         }));
 
     interleave(
         zip(parsedArgs, members->getArgNames()),
         [&](auto it) {
           Record *attr = cast<DefInit>(std::get<0>(it))->getDef();
-          StringRef parser = attr->getValueAsString("cParser");
-          ios << "mlirBytecodeSucceeded("
-              << formatv(parser.str().c_str(), "bcUserState", "bcStream",
+          std::string parser;
+          if (attr->isSubClassOf("Array")) {
+            parser = ("succeeded({0}.readList({2}, " +
+                      listHelperName(std::get<1>(it)) + "))")
+                         .str();
+
+          } else {
+            parser = attr->getValueAsString("cParser").str();
+          }
+          std::string type = getCType(attr);
+          ios << formatv(parser.c_str(), "reader", type,
                          std::get<1>(it)->getAsUnquotedString())
               << ")";
         },
@@ -235,56 +285,21 @@ bool Generator::emitParse(StringRef kind, Record &attr) {
   }
 
   // Return the invoked constructor.
-  ios << formatv("\nreturn mlirBytecodeCreate{0}{1}(bcUserState, bc{2}Handle",
-                 attr.getValueAsString("dialect"), attr.getName(),
-                 capitalize(kind));
+  ios << formatv("\nreturn {0}::get(", returnType);
 
   auto passedArgs = llvm::to_vector(
       make_filter_range(members->getArgNames(), [](StringInit *const str) {
         return !StringRef(str->getAsUnquotedString()).starts_with("_");
       }));
-  if (members->getNumArgs() > 0) {
-    ios.unindent();
-    ios << ", ";
-    interleaveComma(passedArgs, ios, [&](StringInit *str) {
-      ios << str->getAsUnquotedString();
-    });
-  }
+  ios.unindent();
+  interleaveComma(passedArgs, ios,
+                  [&](StringInit *str) { ios << str->getAsUnquotedString(); });
   ios << ");\n";
 
-  if (members->getNumArgs() > 0) {
-    ios << "}\nreturn mlirBytecodeEmitError(\"invalid " << attr.getName()
-        << "\");\n";
-  }
-
-  return false;
-}
-
-bool Generator::emitCreate(StringRef kind, Record &attr) {
-  raw_string_ostream headerOs(topStr);
-  DagInit *members = attr.getValueAsDag("members");
-
-  // Emit extern & weak function for create.
-  // - Extern is function user needs to implement;
-  // - Weak linkage function is to allow partially defining them;
-  headerOs << "// Create method for " << attr.getName() << ".\n";
-  headerOs << "static ";
-
-  raw_string_ostream os(topStr);
-  os << "MlirBytecodeStatus mlirBytecodeCreate"
-     << attr.getValueAsString("dialect") << attr.getName()
-     << formatv("(void *bcUserState, MlirBytecode{0}Handle bc{0}Handle",
-                capitalize(kind));
-
-  if (members->getNumArgs() > 0)
-    os << ", ";
-  interleaveComma(zip(members->getArgs(), members->getArgNames()), os,
-                  [&](auto it) {
-                    Record *attr = cast<DefInit>(std::get<0>(it))->getDef();
-                    os << attr->getValueAsString("cType") << " "
-                       << std::get<1>(it)->getAsUnquotedString();
-                  });
-  headerOs << ");\n\n";
+  // TODO: Emit error in debug.
+  // ios << "}\nreturn mlirBytecodeEmitError(\"invalid " << attr.getName()
+  //     << "\");\n";
+  ios << "}\nreturn " << returnType << "();\n";
 
   return false;
 }
@@ -297,7 +312,7 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
   MapVector<StringRef, AttrOrType> dialectAttrOrType;
   Record *attr = records.getClass("DialectAttribute");
   Record *type = records.getClass("DialectType");
-  for (auto &it : records.getAllDerivedDefinitions("DialectAttributeOrType")) {
+  for (auto &it : records.getAllDerivedDefinitions("DialectAttrOrType")) {
     if (it->isSubClassOf(attr)) {
       dialectAttrOrType[it->getValueAsString("dialect")].attr.push_back(it);
     } else if (it->isSubClassOf(type)) {
@@ -313,13 +328,14 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
     return lhs->getValueAsInt("enum") < rhs->getValueAsInt("enum");
   };
 
-  auto mainFile = std::filesystem::path(records.getInputFilename()).remove_filename();
+  auto mainFile =
+      std::filesystem::path(records.getInputFilename()).remove_filename();
 
   auto it = dialectAttrOrType.front();
   Generator gen(it.first);
   if (gen.init(mainFile
-  
-  ))
+
+               ))
     return true;
 
   {
@@ -327,9 +343,10 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
     std::vector<Record *> &vec = it.second.attr;
     std::sort(vec.begin(), vec.end(), compEnum);
     for (auto kt : vec)
-      if (gen.emitParse("attr", *kt) || gen.emitCreate("attr", *kt))
+      if (gen.emitParseHeader("attribute", *kt) ||
+          gen.emitParse("attribute", *kt))
         return true;
-    gen.emitDispatch("attr", vec);
+    gen.emitDispatch("attribute", vec);
   }
 
   {
@@ -337,7 +354,7 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
     std::vector<Record *> &vec = it.second.type;
     std::sort(vec.begin(), vec.end(), compEnum);
     for (auto kt : vec)
-      if (gen.emitParse("type", *kt) || gen.emitCreate("type", *kt))
+      if (gen.emitParseHeader("type", *kt) || gen.emitParse("type", *kt))
         return true;
     gen.emitDispatch("type", vec);
   }
