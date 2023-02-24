@@ -1,12 +1,14 @@
 // Bytecode base classes/defs.
 // Helper classes/defs to help build a reader/writer.
 
-class Bytecode<string t, string parse, string build, string print> {
+class Bytecode<string parse, string build, string print, string t=""> {
   // Note: if cType is empty, then name of def is used.
   string cType = t;
+
   // {0} == dialect bytecode reader
   // {1} == result type of parsed instance
   // {2} == variable being parsed
+  // If parser is not specified, then the parse of members is used.
   string cParser = parse;
 
   // {0} == result type of parsed instance
@@ -15,7 +17,6 @@ class Bytecode<string t, string parse, string build, string print> {
 
   // {0} == dialect bytecode writer
   // {1} == value being printed
-  // {2} == member variable of value being printed
   string cPrinter = print;
 
   // Predicate guarding parse method as an Attribute/Type could have multiple
@@ -26,27 +27,31 @@ class Bytecode<string t, string parse, string build, string print> {
   string printerPredicate = "";
 }
 
-def Attribute : Bytecode<"",
+class CompositeBytecode<string t = ""> : Bytecode<"", "", "", t>;
+
+def Attribute : Bytecode<
   "succeeded({0}.readAttribute({2}))",
   "{1}",
   "{0}.writeAttribute({2})">;
-def Type: Bytecode<"",
+def Type: Bytecode<
   "succeeded({0}.readType({2}))",
   "{1}",
   "{0}.writeType({2})">;
-def VarInt : Bytecode<"uint64_t",
+def VarInt : Bytecode<
   "succeeded({0}.readVarInt({2}))",
   "{1}",
-  "{0}.writeVarInt({2})">;
+  "{0}.writeVarInt({2})",
+  "uint64_t">;
 
-class KnownWidthAPInt<string s> : Bytecode<"APInt",
+class KnownWidthAPInt<string s> : Bytecode<
   "succeeded(readAPIntWithKnownWidth({0}, " # s # ", {2}))",
   "{1}",
-  "{0}.writeAPIntWithKnownWidth({2})">;
+  "{0}.writeAPIntWithKnownWidth({2})",
+  "APInt">;
 
 // Helper to define variable that is defined later but not parsed nor printed.
-class NoParseSuccess<string t, string d> : Bytecode<t,
-  "(({2} = " # d # "), true", "{1}", "">;
+class LocalVar<string t, string d> : Bytecode<
+  "(({2} = " # d # "), true", "{1}", "", t>;
 
 // Array instances.
 class Array<Bytecode t> {
@@ -56,9 +61,10 @@ class Array<Bytecode t> {
 }
 
 // Define dialect attribute or type.
-// - Any members starting with underscore is not fed to create function but treated as local variable.
 class DialectAttrOrType<string di, int e, dag d> {
   int enum = e;
+  // Any members starting with underscore is not fed to create function but
+  // treated as purely local variable.
   dag members = d;
   string dialect = di;
 
@@ -70,15 +76,16 @@ class DialectAttrOrType<string di, int e, dag d> {
 }
 
 class DialectAttribute<string di, int e, dag d> : DialectAttrOrType<di, e, d>,
-  Bytecode<Attribute.cType,
+  Bytecode<
     "succeeded({0}.readAttribute<{1}>({2}))",
     "{0}::get({1})",
-    Attribute.cPrinter>;
+    Attribute.cPrinter, Attribute.cType>;
 class DialectType<string di, int e, dag d> : DialectAttrOrType<di, e, d>,
-  Bytecode<Type.cType,
+  Bytecode<
     "succeeded({0}.readType<{1}>({2}))",
     "{0}::get({1})",
-    Type.cPrinter>;
+    Type.cPrinter,
+    Type.cType>;
 
 def attr;
 def type;
@@ -90,20 +97,23 @@ def type;
 class BuiltinDialectAttribute<int e, dag d> : DialectAttribute<"Builtin", e, d>;
 class BuiltinDialectType<int e, dag d> : DialectType<"Builtin", e, d>;
 
-def LocationAttr : Bytecode<"LocationAttr",
+def LocationAttr : Bytecode<
   Attribute.cParser,
   "{0}::get({1})",
-  Attribute.cPrinter>;
+  Attribute.cPrinter,
+  "LocationAttr">;
 
-def Location : Bytecode<"Location",
+def Location : Bytecode<
   LocationAttr.cParser,
   "Location({1})",
-  LocationAttr.cPrinter>;
+  LocationAttr.cPrinter,
+  "Location">;
 
-def String : Bytecode<"StringRef",
+def String : Bytecode<
   "{0}.readString({2})",
   "{1}",
-  "{0}.writeOwnedString({2})">;
+  "{0}.writeOwnedString({1})",
+  "StringRef">;
 
 // enum AttributeCode {
 //  ///   ArrayAttr {
@@ -112,18 +122,15 @@ def String : Bytecode<"StringRef",
 //  ///
 //  kArrayAttr = 0,
 //
-//  ///   DictionaryAttr {
-//  ///     attrs: <StringAttr, Attribute>[]
-//  ///   }
-//  kDictionaryAttr = 1,
-//
+
+let cType = "StringAttr" in {
 //  ///   StringAttr {
 //  ///     value: string
 //  ///   }
 //  kStringAttr = 2,
 def StringAttr : BuiltinDialectAttribute</*enum=*/2, (attr
   String:$value
-)> { let cType = "StringAttr"; }
+)>;
 
 //  ///   StringAttrWithType {
 //  ///     value: string,
@@ -134,8 +141,24 @@ def StringAttr : BuiltinDialectAttribute</*enum=*/2, (attr
 def StringAttrWithType : BuiltinDialectAttribute</*enum=*/3, (attr
   String:$value,
   Type:$type
-)> { let cType = "StringAttr"; }
+)>; 
+}
 
+//  ///   DictionaryAttr {
+//  ///     attrs: <StringAttr, Attribute>[]
+//  ///   }
+//  kDictionaryAttr = 1,
+def NamedAttribute : CompositeBytecode {
+  dag members = (attr
+    StringAttr:$name,
+    Attribute:$value
+  );
+}
+def DictionaryAttr : BuiltinDialectAttribute</*enum=*/1, (attr
+  Array<NamedAttribute>:$attrs
+)>;
+
+let cType = "SymbolRefAttr" in {
 //  ///   FlatSymbolRefAttr {
 //  ///     rootReference: StringAttr
 //  ///   }
@@ -143,7 +166,7 @@ def StringAttrWithType : BuiltinDialectAttribute</*enum=*/3, (attr
 //  kFlatSymbolRefAttr = 4,
 def FlatSymbolRefAttr: BuiltinDialectAttribute</*enum=*/4, (attr
   StringAttr:$rootReference
-)>;
+)> { let printerPredicate = "!{0}.hasLeafReferences()"; }
 
 //  ///   SymbolRefAttr {
 //  ///     rootReference: StringAttr,
@@ -153,7 +176,8 @@ def FlatSymbolRefAttr: BuiltinDialectAttribute</*enum=*/4, (attr
 def SymbolRefAttr: BuiltinDialectAttribute</*enum=*/5, (attr
   StringAttr:$rootReference,
   Array<FlatSymbolRefAttr>:$leafReferences
-)>;
+)> { let printerPredicate = "{0}.hasLeafReferences()"; }
+}
 
 //  ///   TypeAttr {
 //  ///     value: Type
@@ -175,7 +199,7 @@ def UnitAttr: BuiltinDialectAttribute</*enum=*/7, (attr)>;
 //  kIntegerAttr = 8,
 def IntegerAttr: BuiltinDialectAttribute</*enum=*/8, (attr
   Type:$type,
-  Bytecode<"unsigned", "({2} = getIntegerBitWidth(type))", "{1}", "">:$_width,
+  LocalVar<"unsigned", "getIntegerBitWidth(type)">:$_width,
   KnownWidthAPInt<"_width">:$value
 )>;
 
@@ -208,15 +232,14 @@ def FileLineColLoc : BuiltinDialectAttribute</*enum=*/11, (attr
   VarInt:$col
 )>;
 
+let cType = "FusedLoc" in {
 //  ///   FusedLoc {
 //  ///     locations: LocationAttr[]
 //  ///   }
 //  kFusedLoc = 12,
 def FusedLoc : BuiltinDialectAttribute</*enum=*/12, (attr
   Array<Location>:$locations
-)> {
-  let printerPredicate = "!{0}.getMetadata()";
-}
+)> { let printerPredicate = "!{0}.getMetadata()"; }
 
 //  ///   FusedLocWithMetadata {
 //  ///     locations: LocationAttr[],
@@ -227,8 +250,7 @@ def FusedLoc : BuiltinDialectAttribute</*enum=*/12, (attr
 def FusedLocWithMetadata : BuiltinDialectAttribute</*enum=*/13, (attr
   Array<Location>:$locations,
   Attribute:$metadata
-)> {
-  let printerPredicate = "{0}.getMetadata()";
+)> { let printerPredicate = "{0}.getMetadata()"; }
 }
 
 //  ///   NameLoc {
@@ -288,14 +310,16 @@ def UnknownLoc : BuiltinDialectAttribute</*enum=*/15, (attr)>;
 //   ///
 //   kIntegerType = 0,
 def IntegerType : BuiltinDialectType</*enum=*/0, (type
+  Bytecode<"({2}=context)", "{1}", "", "MLIRContext*">:$mlirContext,
   // Yes not pretty, 
-  Bytecode<"uint64_t",
+  Bytecode<
     "succeeded({0}.readVarInt({2}))",
     "{1}",
-    "{0}.writeVarInt({1}.getWidth() << 2) | {1}.getSignedness());">:$_widthAndSignedness,
-  // Split up parsed varint.
-  NoParseSuccess<"uint64_t", "_widthAndSignedness >> 2">:$width,
-  NoParseSuccess<"uint64_t",
+    "{0}.writeVarInt({1}.getWidth() << 2) | {1}.getSignedness())",
+    "uint64_t">:$_widthAndSignedness,
+  // Split up parsed varint for create method.
+  LocalVar<"uint64_t", "_widthAndSignedness >> 2">:$width,
+  LocalVar<"uint64_t",
     "static_cast<IntegerType::SignednessSemantics>(_widthAndSignedness & 0x3)">:$signedness
 )>;
 
@@ -444,4 +468,3 @@ def UnrankedTensorType : BuiltinDialectType</*enum=*/18, (type
 //   ///   }
 //   /// Variant of VectorType with scalable dimensions.
 //   kVectorTypeWithScalableDims = 20,
-// };
