@@ -1,4 +1,3 @@
-
 //===- bc-tblgen.cpp - TableGen helper for MLIR bytecode ------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -24,9 +23,8 @@
 
 using namespace llvm;
 
-cl::opt<bool> generateWeak{
-    "emit-weak", cl::desc("Emit weak version of extern functions too"),
-    cl::init(false)};
+cl::opt<std::string> selectedDialect("dialect",
+                                     llvm::cl::desc("The dialect to gen for"));
 
 const char *progName;
 
@@ -36,33 +34,19 @@ static int reportError(Twine Msg) {
   return 1;
 }
 
-const char licenseHeader[] =
-    R"(//===-- {0}.c.inc - Parser driver for {0} dialect ---*- C -*-===//
-//
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM
-// Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-// {0} dialect Attribute & Type parser driver.
-//===----------------------------------------------------------------------===//
-
-)";
-
 // Helper class to generate C++ bytecode parser helpers.
 class Generator {
 public:
   Generator(StringRef dialectName) : dialectName(dialectName) {}
 
   // Returns whether successfully created output dirs/files.
-  bool init(const std::filesystem::path &mainFileRoot);
+  void init(const std::filesystem::path &mainFileRoot);
 
   // Returns whether successfully terminated output files.
-  bool fin(raw_ostream &os);
+  void fin(raw_ostream &os);
 
   // Returns whether successfully emitted attribute/type parsers.
-  bool emitParse(StringRef kind, Record &x);
+  void emitParse(StringRef kind, Record &x);
 
   // Returns whether successfully emitted attribute/type printers.
   void emitPrint(StringRef kind, StringRef type, ArrayRef<Record *> vec);
@@ -70,13 +54,14 @@ public:
   // Emits parse dispatch table.
   void emitParseDispatch(StringRef kind, ArrayRef<Record *> vec);
 
-  // TODO: Emit print dispatch table.
+  // Emits print dispatch table.
+  void emitPrintDispatch(StringRef kind, ArrayRef<std::string> vec);
 
 private:
   // Emits parse calls to construct givin kind.
-  bool emitParseHelper(StringRef kind, StringRef returnType, StringRef builder,
+  void emitParseHelper(StringRef kind, StringRef returnType, StringRef builder,
                        ArrayRef<Init *> args, ArrayRef<std::string> argNames,
-                       mlir::raw_indented_ostream &ios);
+                       StringRef failure, mlir::raw_indented_ostream &ios);
 
   // Emits print instructions.
   void emitPrintHelper(Record *memberRec, StringRef kind, StringRef parent,
@@ -86,53 +71,27 @@ private:
   std::string topStr, bottomStr;
 };
 
-bool Generator::init(const std::filesystem::path &mainFileRoot) {
-  {
-    // Generate top section.
-    raw_string_ostream os(topStr);
-    os << formatv(licenseHeader, dialectName);
+void Generator::init(const std::filesystem::path &mainFileRoot) {
+  // Generate top section.
+  raw_string_ostream os(topStr);
 
-    // Inject additional header include file.
-    auto incHeaderFileName =
-        mainFileRoot / formatv("{0}Inc.h", dialectName).str();
-    if (std::filesystem::exists(incHeaderFileName)) {
-      auto incFileOr =
-          MemoryBuffer::getFile(incHeaderFileName.string(), /*IsText=*/true,
-                                /*RequiresNullTerminator=*/false);
-      if (incFileOr) {
-        os << incFileOr->get()->getBuffer() << "\n";
-      } else {
-        llvm::errs() << "FAILURE: " << incFileOr.getError().message();
-        return true;
-      }
+  // Inject additional header include file.
+  auto incHeaderFileName =
+      mainFileRoot / formatv("{0}Inc.h", dialectName).str();
+  if (std::filesystem::exists(incHeaderFileName)) {
+    auto incFileOr =
+        MemoryBuffer::getFile(incHeaderFileName.string(), /*IsText=*/true,
+                              /*RequiresNullTerminator=*/false);
+    if (incFileOr) {
+      os << incFileOr->get()->getBuffer() << "\n";
+    } else {
+      PrintFatalError("FAILURE: " + incFileOr.getError().message());
     }
   }
-
-  {
-    // Generate bottom section.
-    raw_string_ostream os(topStr);
-    // Inject additional cpp include file.
-    auto incCppFileName =
-        mainFileRoot / formatv("{0}Inc.cpp", dialectName).str();
-    if (std::filesystem::exists(incCppFileName)) {
-      auto incFileOr =
-          MemoryBuffer::getFile(incCppFileName.string(), /*IsText=*/true,
-                                /*RequiresNullTerminator=*/false);
-      if (incFileOr) {
-        os << incFileOr->get()->getBuffer() << "\n";
-      } else {
-        llvm::errs() << "FAILURE: " << incFileOr.getError().message();
-        return true;
-      }
-    }
-  }
-
-  return false;
 }
 
-bool Generator::fin(raw_ostream &os) {
+void Generator::fin(raw_ostream &os) {
   os << topStr << "\n" << StringRef(bottomStr).rtrim() << "\n";
-  return false;
 }
 
 static std::string capitalize(StringRef str) {
@@ -159,19 +118,19 @@ std::string getCType(Record *def) {
 void Generator::emitParseDispatch(StringRef kind, ArrayRef<Record *> vec) {
   raw_string_ostream sos(bottomStr);
   mlir::raw_indented_ostream os(sos);
-  char const *head = R"({1} {0}DialectBytecodeInterface::read{1}(
-      DialectBytecodeReader &reader)";
-  os << formatv(head, dialectName, capitalize(kind));
+  char const *head =
+      R"(static {0} read{0}(MLIRContext* context, DialectBytecodeReader &reader))";
+  os << formatv(head, capitalize(kind));
   auto funScope = os.scope(" {\n", "}\n\n");
 
   os << "uint64_t kind;\n";
-  os << "if (failed(dialectReader.readVarInt(kind)))\n"
+  os << "if (failed(reader.readVarInt(kind)))\n"
      << "  return " << capitalize(kind) << "();\n";
   os << "switch (kind) ";
   {
     auto switchScope = os.scope("{\n", "}\n");
     for (auto it : vec) {
-      os << formatv("case /* {0} */ {1}:\n  return read{0}(dialectReader);\n",
+      os << formatv("case /* {0} */ {1}:\n  return read{0}(context, reader);\n",
                     it->getName(), it->getValueAsInt("enum"));
     }
     os << "default:\n"
@@ -179,12 +138,12 @@ void Generator::emitParseDispatch(StringRef kind, ArrayRef<Record *> vec) {
        << "<< kind;\n"
        << "  return " << capitalize(kind) << "();\n";
   }
-  os << "\nreturn success();\n";
+  os << "return " << capitalize(kind) << "();\n";
 }
 
-bool Generator::emitParse(StringRef kind, Record &attr) {
+void Generator::emitParse(StringRef kind, Record &attr) {
   char const *head =
-      R"(static {0} read{1}(MlirContext* context, DialectBytecodeReader &reader) )";
+      R"(static {0} read{1}(MLIRContext* context, DialectBytecodeReader &reader) )";
   raw_string_ostream os(bottomStr);
   mlir::raw_indented_ostream ios(os);
   std::string returnType = getCType(&attr);
@@ -195,20 +154,20 @@ bool Generator::emitParse(StringRef kind, Record &attr) {
         return init->getAsUnquotedString();
       }));
   StringRef builder = attr.getValueAsString("cBuilder");
-  return emitParseHelper(kind, returnType, builder, members->getArgs(),
-                         argNames, ios);
+  emitParseHelper(kind, returnType, builder, members->getArgs(), argNames,
+                  returnType + "()", ios);
 }
 
-bool Generator::emitParseHelper(StringRef kind, StringRef returnType,
+void Generator::emitParseHelper(StringRef kind, StringRef returnType,
                                 StringRef builder, ArrayRef<Init *> args,
                                 ArrayRef<std::string> argNames,
+                                StringRef failure,
                                 mlir::raw_indented_ostream &ios) {
   auto funScope = ios.scope("{\n", "}\n\n");
 
-  // Parses for trivial constructors handled in dispatch.
   if (args.empty()) {
     ios << formatv("return {0}::get(context);\n", returnType);
-    return false;
+    return;
   }
 
   // Print decls.
@@ -216,7 +175,7 @@ bool Generator::emitParseHelper(StringRef kind, StringRef returnType,
   for (auto [arg, name] : zip(args, argNames)) {
     DefInit *first = dyn_cast<DefInit>(arg);
     if (!first)
-      return reportError("Unexpected type for " + name);
+      PrintFatalError("Unexpected type for " + name);
     Record *def = first->getDef();
 
     std::string cType = getCType(def);
@@ -264,9 +223,9 @@ bool Generator::emitParseHelper(StringRef kind, StringRef returnType,
       args = {def->getDefInit()};
       argNames = {"temp"};
     }
-    StringRef builder = attr->getValueAsString("cBuilder");
-    if (emitParseHelper(kind, returnType, builder, args, argNames, ios))
-      return true;
+    StringRef builder = def->getValueAsString("cBuilder");
+    emitParseHelper(kind, returnType, builder, args, argNames, "failure()", ios);
+    ios << ";";
   }
 
   // Print parse conditional.
@@ -288,19 +247,21 @@ bool Generator::emitParseHelper(StringRef kind, StringRef returnType,
         [&](std::tuple<llvm::Init *&, const std::string &> it) {
           Record *attr = cast<DefInit>(std::get<0>(it))->getDef();
           std::string parser;
-          if (attr->isSubClassOf("Array")) {
+          if (auto optParser = attr->getValueAsOptionalString("cParser")) {
+            parser = *optParser;
+          } else if (attr->isSubClassOf("Array")) {
             Record *def = attr->getValueAsDef("elemT");
             bool composite = def->isSubClassOf("CompositeBytecode");
             if (!composite && def->isSubClassOf("AttributeKind"))
               parser = "succeeded({0}.readAttributes({2}))";
             else if (!composite && def->isSubClassOf("TypeKind"))
-              parser = "succeeded({0}.readType({2}))";
+              parser = "succeeded({0}.readTypes({2}))";
             else
               parser = ("succeeded({0}.readList({2}, " +
                         listHelperName(std::get<1>(it)) + "))")
                            .str();
           } else {
-            parser = attr->getValueAsString("cParser").str();
+            PrintFatalError(attr->getLoc(), "No parser specified");
           }
           std::string type = getCType(attr);
           ios << formatv(parser.c_str(), "reader", type, std::get<1>(it));
@@ -325,15 +286,13 @@ bool Generator::emitParseHelper(StringRef kind, StringRef returnType,
   // constructed. ios << "}\nreturn mlirBytecodeEmitError(\"invalid " <<
   // attr.getName()
   //     << "\");\n";
-  ios << "}\nreturn " << returnType << "();\n";
-
-  return false;
+  ios << "}\nreturn " << failure << ";\n";
 }
 
 void Generator::emitPrint(StringRef kind, StringRef type,
                           ArrayRef<Record *> vec) {
   char const *head =
-      R"(static void write({0} {1}, DialectBytecodeWriter &writer) const )";
+      R"(static void write({0} {1}, DialectBytecodeWriter &writer) )";
   raw_string_ostream os(bottomStr);
   mlir::raw_indented_ostream ios(os);
   ios << formatv(head, type, kind);
@@ -397,7 +356,6 @@ void Generator::emitPrintHelper(Record *memberRec, StringRef kind,
         ios << "writer.writeTypes(" << getter << ");\n";
         return;
       }
-      PrintFatalError(def->getLoc(), "unsupported non-composite list type");
     }
     std::string returnType = getCType(def);
     ios << "writer.writeList(" << getter << ", [&](" << returnType << " "
@@ -421,6 +379,25 @@ void Generator::emitPrintHelper(Record *memberRec, StringRef kind,
     ios << formatv(printer.c_str(), "writer", name, getter) << ";\n";
 }
 
+void Generator::emitPrintDispatch(StringRef kind, ArrayRef<std::string> vec) {
+  raw_string_ostream sos(bottomStr);
+  mlir::raw_indented_ostream os(sos);
+  char const *head = R"(static LogicalResult write{0}({0} {1},
+                                DialectBytecodeWriter &writer))";
+  os << formatv(head, capitalize(kind), kind);
+  auto funScope = os.scope(" {\n", "}\n\n");
+
+  os << "return TypeSwitch<" << capitalize(kind) << ", LogicalResult>(" << kind
+     << ")";
+  auto switchScope = os.scope("", "");
+  for (StringRef type : vec) {
+    os << "\n.Case([&](" << type << " t)";
+    auto caseScope = os.scope(" {\n", "})");
+    os << "return write(t, writer), success();\n";
+  }
+  os << "\n.Default([&](" << capitalize(kind) << ") { return failure(); });\n";
+}
+
 struct AttrOrType {
   std::vector<Record *> attr, type;
 };
@@ -430,6 +407,10 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
   Record *attr = records.getClass("DialectAttribute");
   Record *type = records.getClass("DialectType");
   for (auto &it : records.getAllDerivedDefinitions("DialectAttrOrType")) {
+    if (!selectedDialect.empty() &&
+        it->getValueAsString("dialect") != selectedDialect)
+      continue;
+
     if (it->isSubClassOf(attr)) {
       dialectAttrOrType[it->getValueAsString("dialect")].attr.push_back(it);
     } else if (it->isSubClassOf(type)) {
@@ -438,7 +419,8 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
   }
 
   if (dialectAttrOrType.size() != 1)
-    return reportError("Only single dialect per invocation allowed");
+    return reportError("Single dialect per invocation required (either only "
+                       "one in input file or specified via dialect option)");
 
   // Compare two records by enum value.
   auto compEnum = [](Record *lhs, Record *rhs) -> int {
@@ -450,8 +432,7 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
 
   auto it = dialectAttrOrType.front();
   Generator gen(it.first);
-  if (gen.init(mainFile))
-    return true;
+  gen.init(mainFile);
 
   SmallVector<std::vector<Record *> *, 2> vecs;
   SmallVector<std::string, 2> kinds;
@@ -467,13 +448,17 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
       perType[getCType(kt)].push_back(kt);
     for (auto jt : perType) {
       for (auto kt : jt.second)
-        if (gen.emitParse("attribute", *kt))
-          return true;
-      gen.emitPrint("attribute", jt.first, jt.second);
+        gen.emitParse(kind, *kt);
+      gen.emitPrint(kind, jt.first, jt.second);
     }
-    gen.emitParseDispatch("attribute", *vec);
-  }
+    gen.emitParseDispatch(kind, *vec);
 
+    SmallVector<std::string> types;
+    for (auto it : perType) {
+      types.push_back(it.first);
+    }
+    gen.emitPrintDispatch(kind, types);
+  }
   gen.fin(os);
 
   return false;

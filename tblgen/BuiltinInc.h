@@ -9,8 +9,8 @@ static LogicalResult readAPIntWithKnownWidth(DialectBytecodeReader &reader,
 }
 
 // Returns the bitwidth if known, else return 0.
-static unsigned getIntegerBitWidth(DialectBytecodeReader &reader, Type t) {
-  if (auto intType = type.dyn_cast<IntegerType>()) {
+static unsigned getIntegerBitWidth(DialectBytecodeReader &reader, Type type) {
+  if (auto intType = dyn_cast<IntegerType>(type)) {
     return intType.getWidth();
   } else if (type.isa<IndexType>()) {
     return IndexType::kInternalStorageBitWidth;
