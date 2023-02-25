@@ -2,22 +2,29 @@
 // Helper classes/defs to help build a reader/writer.
 
 class Bytecode<string parse, string build, string print, string t=""> {
-  // Note: if cType is empty, then name of def is used.
-  string cType = t;
-
+  // Template for parsing.
   // {0} == dialect bytecode reader
   // {1} == result type of parsed instance
   // {2} == variable being parsed
   // If parser is not specified, then the parse of members is used.
   string cParser = parse;
 
+  // Template for building from parsed.
   // {0} == result type of parsed instance
   // {1} == args/members comma separated
   string cBuilder = build;
 
+  // Template for printing.
   // {0} == dialect bytecode writer
   // {1} == value being printed
   string cPrinter = print;
+
+  // Template for getter from in memory form.
+  // TODO: string cGetter
+
+  // Type built.
+  // Note: if cType is empty, then name of def is used.
+  string cType = t;
 
   // Predicate guarding parse method as an Attribute/Type could have multiple
   // parse methods, specify predicates to be orthogonal and cover entire
@@ -27,27 +34,39 @@ class Bytecode<string parse, string build, string print, string t=""> {
   string printerPredicate = "";
 }
 
-class CompositeBytecode<string t = ""> : Bytecode<"", "", "", t>;
+def EmptyBytecode : Bytecode<"", "", "", "">;
+class WithParser<string p="", Bytecode t=EmptyBytecode> :
+  Bytecode<p, t.cBuilder, t.cPrinter, t.cType>;
+class WithBuilder<string b="", Bytecode t=EmptyBytecode> :
+  Bytecode<t.cParser, b, t.cPrinter, t.cType>;
+class WithPrinter<string p="", Bytecode t=EmptyBytecode> :
+  Bytecode<t.cParser, t.cBuilder, p, t.cType>;
+class WithType<string ty="", Bytecode t=EmptyBytecode> :
+  Bytecode<t.cParser, t.cBuilder, t.cPrinter, ty>;
 
-def Attribute : Bytecode<
+class CompositeBytecode<string t = ""> : WithType<t>;
+
+class AttributeKind : Bytecode<
   "succeeded({0}.readAttribute({2}))",
   "{1}",
   "{0}.writeAttribute({2})">;
-def Type: Bytecode<
+def Attribute : AttributeKind;
+class TypeKind : Bytecode<
   "succeeded({0}.readType({2}))",
   "{1}",
   "{0}.writeType({2})">;
-def VarInt : Bytecode<
-  "succeeded({0}.readVarInt({2}))",
-  "{1}",
-  "{0}.writeVarInt({2})",
-  "uint64_t">;
+def Type : TypeKind;
+def VarInt :
+  WithParser <"succeeded({0}.readVarInt({2}))",
+  WithBuilder<"{1}",
+  WithPrinter<"{0}.writeVarInt({2})",
+  WithType   <"uint64_t">>>>;
 
-class KnownWidthAPInt<string s> : Bytecode<
-  "succeeded(readAPIntWithKnownWidth({0}, " # s # ", {2}))",
-  "{1}",
-  "{0}.writeAPIntWithKnownWidth({2})",
-  "APInt">;
+class KnownWidthAPInt<string s> :
+  WithParser <"succeeded(readAPIntWithKnownWidth({0}, " # s # ", {2}))",
+  WithBuilder<"{1}",
+  WithPrinter<"{0}.writeAPIntWithKnownWidth({2})",
+  WithType   <"APInt">>>>;
 
 // Helper to define variable that is defined later but not parsed nor printed.
 class LocalVar<string t, string d> : Bytecode<
@@ -76,16 +95,15 @@ class DialectAttrOrType<string di, int e, dag d> {
 }
 
 class DialectAttribute<string di, int e, dag d> : DialectAttrOrType<di, e, d>,
-  Bytecode<
-    "succeeded({0}.readAttribute<{1}>({2}))",
-    "{0}::get({1})",
-    Attribute.cPrinter, Attribute.cType>;
+    AttributeKind {
+  let cParser = "succeeded({0}.readAttribute<{1}>({2}))";
+  let cBuilder = "{0}::get({1})";
+}
 class DialectType<string di, int e, dag d> : DialectAttrOrType<di, e, d>,
-  Bytecode<
-    "succeeded({0}.readType<{1}>({2}))",
-    "{0}::get({1})",
-    Type.cPrinter,
-    Type.cType>;
+    TypeKind {
+  let cParser = "succeeded({0}.readAttribute<{1}>({2}))";
+  let cBuilder = "{0}::get({1})";
+}
 
 def attr;
 def type;
@@ -97,17 +115,15 @@ def type;
 class BuiltinDialectAttribute<int e, dag d> : DialectAttribute<"Builtin", e, d>;
 class BuiltinDialectType<int e, dag d> : DialectType<"Builtin", e, d>;
 
-def LocationAttr : Bytecode<
-  Attribute.cParser,
-  "{0}::get({1})",
-  Attribute.cPrinter,
-  "LocationAttr">;
+def LocationAttr : AttributeKind {
+  let cBuilder = "{0}::get({1})";
+  let cType = "LocationAttr";
+}
 
-def Location : Bytecode<
-  LocationAttr.cParser,
-  "Location({1})",
-  LocationAttr.cPrinter,
-  "Location">;
+def Location : AttributeKind {
+  let cBuilder = "Location({1})";
+  let cType = "Location";
+}
 
 def String : Bytecode<
   "{0}.readString({2})",
@@ -130,7 +146,7 @@ let cType = "StringAttr" in {
 //  kStringAttr = 2,
 def StringAttr : BuiltinDialectAttribute</*enum=*/2, (attr
   String:$value
-)>;
+)> { let printerPredicate = "{0}.getType().isa<NoneType>()"; }
 
 //  ///   StringAttrWithType {
 //  ///     value: string,
@@ -141,7 +157,7 @@ def StringAttr : BuiltinDialectAttribute</*enum=*/2, (attr
 def StringAttrWithType : BuiltinDialectAttribute</*enum=*/3, (attr
   String:$value,
   Type:$type
-)>; 
+)> { let printerPredicate = "!{0}.getType().isa<NoneType>()"; }
 }
 
 //  ///   DictionaryAttr {
