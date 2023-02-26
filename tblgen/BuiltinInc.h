@@ -1,5 +1,3 @@
-#include <stdbool.h>
-
 static LogicalResult readAPIntWithKnownWidth(DialectBytecodeReader &reader,
     unsigned bitWidth, APInt &val) {
   FailureOr<APInt> value = reader.readAPIntWithKnownWidth(bitWidth);

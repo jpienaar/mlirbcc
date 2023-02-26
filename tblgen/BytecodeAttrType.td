@@ -1,7 +1,7 @@
 // Bytecode base classes/defs.
 // Helper classes/defs to help build a reader/writer.
 
-class Bytecode<string parse, string build, string print, string t=""> {
+class Bytecode<string parse="", string build="", string print="", string get="", string t=""> {
   // Template for parsing.
   // {0} == dialect bytecode reader
   // {1} == result type of parsed instance
@@ -16,11 +16,15 @@ class Bytecode<string parse, string build, string print, string t=""> {
 
   // Template for printing.
   // {0} == dialect bytecode writer
-  // {1} == value being printed
+  // {1} == parent attribute/type name
+  // {2} == getter
   string cPrinter = print;
 
   // Template for getter from in memory form.
-  // TODO: string cGetter
+  // {0} == attribute/type
+  // {1} == member instance
+  // {2} == get + UpperCamelFromSnake({1})
+  string cGetter = get;
 
   // Type built.
   // Note: if cType is empty, then name of def is used.
@@ -34,15 +38,16 @@ class Bytecode<string parse, string build, string print, string t=""> {
   string printerPredicate = "";
 }
 
-def EmptyBytecode : Bytecode<"", "", "", "">;
-class WithParser<string p="", Bytecode t=EmptyBytecode> :
-  Bytecode<p, t.cBuilder, t.cPrinter, t.cType>;
-class WithBuilder<string b="", Bytecode t=EmptyBytecode> :
-  Bytecode<t.cParser, b, t.cPrinter, t.cType>;
-class WithPrinter<string p="", Bytecode t=EmptyBytecode> :
-  Bytecode<t.cParser, t.cBuilder, p, t.cType>;
-class WithType<string ty="", Bytecode t=EmptyBytecode> :
-  Bytecode<t.cParser, t.cBuilder, t.cPrinter, ty>;
+class WithParser<string p="", Bytecode t=Bytecode<>> :
+  Bytecode<p, t.cBuilder, t.cPrinter, t.cGetter, t.cType>;
+class WithBuilder<string b="", Bytecode t=Bytecode<>> :
+  Bytecode<t.cParser, b, t.cPrinter, t.cGetter, t.cType>;
+class WithPrinter<string p="", Bytecode t=Bytecode<>> :
+  Bytecode<t.cParser, t.cBuilder, p, t.cGetter, t.cType>;
+class WithType<string ty="", Bytecode t=Bytecode<>> :
+  Bytecode<t.cParser, t.cBuilder, t.cPrinter, t.cGetter, ty>;
+class WithGetter<string g="", Bytecode t=Bytecode<>> :
+  Bytecode<t.cParser, t.cBuilder, t.cPrinter, g, t.cType>;
 
 class CompositeBytecode<string t = ""> : WithType<t>;
 
@@ -69,8 +74,11 @@ class KnownWidthAPInt<string s> :
   WithType   <"APInt">>>>;
 
 // Helper to define variable that is defined later but not parsed nor printed.
-class LocalVar<string t, string d> : Bytecode<
-  "(({2} = " # d # "), true)", "{1}", "", t>;
+class LocalVar<string t, string d> :
+  WithParser <"(({2} = " # d # "), true)",
+  WithBuilder<"{1}",
+  WithPrinter<"",
+  WithType   <t>>>>;
 
 // Array instances.
 class Array<Bytecode t> {
@@ -105,6 +113,12 @@ class DialectType<string di, int e, dag d> : DialectAttrOrType<di, e, d>,
   let cBuilder = "{0}::get({1})";
 }
 
+def Context : 
+  WithParser <"({2}=context)",
+  WithBuilder<"{1}",
+  WithPrinter<"",
+  WithType   <"MLIRContext*">>>>;
+
 def attr;
 def type;
 
@@ -115,14 +129,11 @@ def type;
 class BuiltinDialectAttribute<int e, dag d> : DialectAttribute<"Builtin", e, d>;
 class BuiltinDialectType<int e, dag d> : DialectType<"Builtin", e, d>;
 
-def LocationAttr : AttributeKind {
-  let cBuilder = "{0}::get({1})";
-  let cType = "LocationAttr";
-}
+def LocationAttr : AttributeKind;
 
 def Location : CompositeBytecode {
   dag members = (attr
-    LocationAttr:$value
+    WithGetter<"(LocationAttr){0}", WithType<"LocationAttr", LocationAttr>>:$value
   );
   let cBuilder = "Location({1})";
 }
@@ -130,7 +141,7 @@ def Location : CompositeBytecode {
 def String :
   WithParser <"succeeded({0}.readString({2}))",
   WithBuilder<"{1}",
-  WithPrinter<"{0}.writeOwnedString({1})",
+  WithPrinter<"{0}.writeOwnedString({2})",
   WithType   <"StringRef">>>>;
 
 // enum AttributeCode {
@@ -148,7 +159,10 @@ let cType = "StringAttr" in {
 //  kStringAttr = 2,
 def StringAttr : BuiltinDialectAttribute</*enum=*/2, (attr
   String:$value
-)> { let printerPredicate = "{0}.getType().isa<NoneType>()"; }
+)> {
+  let printerPredicate = "{0}.getType().isa<NoneType>()";
+  let cBuilder = "StringAttr::get(context, {1})";
+}
 
 //  ///   StringAttrWithType {
 //  ///     value: string,
@@ -175,12 +189,11 @@ def NamedAttribute : CompositeBytecode {
 }
 def DictionaryAttr : BuiltinDialectAttribute</*enum=*/1, (attr
   // TODO: handle context constructors a bit nicer.
-  Bytecode<"({2}=context)", "{1}", "", "MLIRContext*">:$mlirContext,
+  Context:$mlirContext,
 
   Array<NamedAttribute>:$value
 )>;
 
-let cType = "SymbolRefAttr" in {
 //  ///   FlatSymbolRefAttr {
 //  ///     rootReference: StringAttr
 //  ///   }
@@ -188,7 +201,7 @@ let cType = "SymbolRefAttr" in {
 //  kFlatSymbolRefAttr = 4,
 def FlatSymbolRefAttr: BuiltinDialectAttribute</*enum=*/4, (attr
   StringAttr:$rootReference
-)> { let printerPredicate = "{0}.getNestedReferences().empty()"; }
+)>;
 
 //  ///   SymbolRefAttr {
 //  ///     rootReference: StringAttr,
@@ -198,8 +211,7 @@ def FlatSymbolRefAttr: BuiltinDialectAttribute</*enum=*/4, (attr
 def SymbolRefAttr: BuiltinDialectAttribute</*enum=*/5, (attr
   StringAttr:$rootReference,
   Array<FlatSymbolRefAttr>:$nestedReferences
-)> { let printerPredicate = "!{0}.getNestedReferences().empty()"; }
-}
+)>;
 
 //  ///   TypeAttr {
 //  ///     value: Type
@@ -256,15 +268,15 @@ def FileLineColLoc : BuiltinDialectAttribute</*enum=*/11, (attr
 
 let cType = "FusedLoc" in {
 //  ///   FusedLoc {
-//  ///     locations: LocationAttr[]
+//  ///     locations: Location[]
 //  ///   }
 //  kFusedLoc = 12,
 def FusedLoc : BuiltinDialectAttribute</*enum=*/12, (attr
-  // TODO: handle context constructors a bit nicer.
-  Bytecode<"({2}=context)", "{1}", "", "MLIRContext*">:$mlirContext,
-
   Array<Location>:$locations
-)> { let printerPredicate = "!{0}.getMetadata()"; }
+)> {
+  let printerPredicate = "!{0}.getMetadata()";
+  let cBuilder = "cast<FusedLoc>(FusedLoc::get(context, {1}))";
+}
 
 //  ///   FusedLocWithMetadata {
 //  ///     locations: LocationAttr[],
@@ -275,7 +287,10 @@ def FusedLoc : BuiltinDialectAttribute</*enum=*/12, (attr
 def FusedLocWithMetadata : BuiltinDialectAttribute</*enum=*/13, (attr
   Array<Location>:$locations,
   Attribute:$metadata
-)> { let printerPredicate = "{0}.getMetadata()"; }
+)> {
+  let printerPredicate = "{0}.getMetadata()";
+  let cBuilder = "cast<FusedLoc>(FusedLoc::get(context, {1}))";
+}
 }
 
 //  ///   NameLoc {
@@ -336,13 +351,13 @@ def UnknownLoc : BuiltinDialectAttribute</*enum=*/15, (attr)>;
 //   kIntegerType = 0,
 def IntegerType : BuiltinDialectType</*enum=*/0, (type
   // TODO: handle context constructors a bit nicer.
-  Bytecode<"({2}=context)", "{1}", "", "MLIRContext*">:$mlirContext,
+  Context:$mlirContext,
+
   // Yes not pretty, 
-  Bytecode<
-    "succeeded({0}.readVarInt({2}))",
-    "{1}",
-    "{0}.writeVarInt({2}.getWidth() << 2 | {2}.getSignedness())",
-    "uint64_t">:$_widthAndSignedness,
+  WithParser<"succeeded({0}.readVarInt({2}))",
+    WithBuilder<"{1}",
+    WithPrinter<"{0}.writeVarInt({1}.getWidth() << 2 | {1}.getSignedness())",
+    WithType   <"uint64_t">>>>:$_widthAndSignedness,
   // Split up parsed varint for create method.
   LocalVar<"uint64_t", "_widthAndSignedness >> 2">:$width,
   LocalVar<"IntegerType::SignednessSemantics",
@@ -364,7 +379,7 @@ def IndexType : BuiltinDialectType</*enum=*/1, (type)>;
 //   kFunctionType = 2,
 def FunctionType : BuiltinDialectType</*enum=*/2, (type
   // TODO: handle context constructors a bit nicer.
-  Bytecode<"({2}=context)", "{1}", "", "MLIRContext*">:$mlirContext,
+  Context:$mlirContext,
 
   Array<Type>:$inputs,
   Array<Type>:$results
@@ -459,7 +474,7 @@ def NoneType : BuiltinDialectType</*enum=*/12, (type)>;
 //   kTupleType = 15,
 def TupleType : BuiltinDialectType</*enum=*/15, (type
   // TODO: handle context constructors a bit nicer.
-  Bytecode<"({2}=context)", "{1}", "", "MLIRContext*">:$mlirContext,
+  Context:$mlirContext,
 
   Array<Type>:$types
 )>;

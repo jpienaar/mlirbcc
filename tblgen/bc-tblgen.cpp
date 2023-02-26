@@ -107,8 +107,9 @@ std::string getCType(Record *def) {
 
   StringRef cType = def->getValueAsString("cType");
   if (cType.empty()) {
-    if (def->isAnonymous())
+    if (def->isAnonymous()) {
       PrintFatalError(def->getLoc(), "Unable to determine cType");
+    }
 
     return formatv(format.c_str(), def->getName().str());
   }
@@ -224,7 +225,8 @@ void Generator::emitParseHelper(StringRef kind, StringRef returnType,
       argNames = {"temp"};
     }
     StringRef builder = def->getValueAsString("cBuilder");
-    emitParseHelper(kind, returnType, builder, args, argNames, "failure()", ios);
+    emitParseHelper(kind, returnType, builder, args, argNames, "failure()",
+                    ios);
     ios << ";";
   }
 
@@ -341,9 +343,16 @@ void Generator::emitPrint(StringRef kind, StringRef type,
 void Generator::emitPrintHelper(Record *memberRec, StringRef kind,
                                 StringRef parent, StringRef name,
                                 mlir::raw_indented_ostream &ios) {
-  std::string getter =
-      formatv("{0}.get{1}()", parent, convertToCamelFromSnakeCase(name, true))
-          .str();
+  std::string getter;
+  if (auto cGetter = memberRec->getValueAsOptionalString("cGetter");
+      cGetter && !cGetter->empty()) {
+    getter = formatv(cGetter->str().c_str(), parent,
+                     "get" + convertToCamelFromSnakeCase(name, true));
+  } else {
+    getter =
+        formatv("{0}.get{1}()", parent, convertToCamelFromSnakeCase(name, true))
+            .str();
+  }
 
   if (memberRec->isSubClassOf("Array")) {
     Record *def = memberRec->getValueAsDef("elemT");
@@ -376,7 +385,7 @@ void Generator::emitPrintHelper(Record *memberRec, StringRef kind,
 
   if (std::string printer = memberRec->getValueAsString("cPrinter").str();
       !printer.empty())
-    ios << formatv(printer.c_str(), "writer", name, getter) << ";\n";
+    ios << formatv(printer.c_str(), "writer", kind, getter) << ";\n";
 }
 
 void Generator::emitPrintDispatch(StringRef kind, ArrayRef<std::string> vec) {
