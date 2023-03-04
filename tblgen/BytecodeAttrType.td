@@ -66,12 +66,33 @@ def VarInt :
   WithBuilder<"{1}",
   WithPrinter<"{0}.writeVarInt({2})",
   WithType   <"uint64_t">>>>;
+def SignedVarInt :
+  WithParser <"succeeded({0}.readSignedVarInt({2}))",
+  WithBuilder<"{1}",
+  WithPrinter<"{0}.writeSignedVarInt({2})",
+  WithGetter<"{0}",
+  WithType   <"int64_t">>>>>;
+def Blob :
+  WithParser <"succeeded({0}.readBlob({2}))",
+  WithBuilder<"{1}",
+  WithPrinter<"{0}.writeOwnedBlob({2})",
+  WithType   <"ArrayRef<char>">>>>;
 
 class KnownWidthAPInt<string s> :
   WithParser <"succeeded(readAPIntWithKnownWidth({0}, " # s # ", {2}))",
   WithBuilder<"{1}",
   WithPrinter<"{0}.writeAPIntWithKnownWidth({2})",
   WithType   <"APInt">>>>;
+class KnownSemanticsAPFloat<string s> :
+  WithParser <"succeeded(readAPFloatWithKnownSemantics({0}, " # s # ", *{2}))",
+  WithBuilder<"{1}",
+  WithPrinter<"{0}.writeAPFloatWithKnownSemantics({2})",
+  WithType   <"std::optional<APFloat>">>>>;
+class ResourceHandle<string s> :
+  WithParser <"succeeded(readResourceHandle<" # s # ">({0}, *{2}))",
+  WithBuilder<"{1}",
+  WithPrinter<"{0}.writeResourceHandle({2})",
+  WithType   <"std::optional<" # s # ">">>>>;
 
 // Helper to define variable that is defined later but not parsed nor printed.
 class LocalVar<string t, string d> :
@@ -88,8 +109,7 @@ class Array<Bytecode t> {
 }
 
 // Define dialect attribute or type.
-class DialectAttrOrType<string di, int e, dag d> {
-  int enum = e;
+class DialectAttrOrType<string di, dag d> {
   // Any members starting with underscore is not fed to create function but
   // treated as purely local variable.
   dag members = d;
@@ -102,22 +122,26 @@ class DialectAttrOrType<string di, int e, dag d> {
   code postProcess = "";
 }
 
-class DialectAttribute<string di, int e, dag d> : DialectAttrOrType<di, e, d>,
+class DialectAttribute<string di, dag d> : DialectAttrOrType<di, d>,
     AttributeKind {
   let cParser = "succeeded({0}.readAttribute<{1}>({2}))";
-  let cBuilder = "{0}::get({1})";
+  let cBuilder = "get<{0}>(context, {1})";
 }
-class DialectType<string di, int e, dag d> : DialectAttrOrType<di, e, d>,
+class DialectType<string di, dag d> : DialectAttrOrType<di, d>,
     TypeKind {
-  let cParser = "succeeded({0}.readAttribute<{1}>({2}))";
-  let cBuilder = "{0}::get({1})";
+  let cParser = "succeeded({0}.readType<{1}>({2}))";
+  let cBuilder = "get<{0}>(context, {1})";
 }
 
-def Context : 
-  WithParser <"({2}=context)",
-  WithBuilder<"{1}",
-  WithPrinter<"",
-  WithType   <"MLIRContext*">>>>;
+class DialectAttributes<string name> {
+  string dialect = name;
+  list<DialectAttrOrType> elems;
+}
+
+class DialectTypes<string name> {
+  string dialect = name;
+  list<DialectAttrOrType> elems;
+}
 
 def attr;
 def type;
@@ -126,8 +150,8 @@ def type;
 // Builtin dialect.
 // ================
 
-class BuiltinDialectAttribute<int e, dag d> : DialectAttribute<"Builtin", e, d>;
-class BuiltinDialectType<int e, dag d> : DialectType<"Builtin", e, d>;
+class BuiltinDialectAttribute<dag d> : DialectAttribute<"Builtin", d>;
+class BuiltinDialectType<dag d> : DialectType<"Builtin", d>;
 
 def LocationAttr : AttributeKind;
 
@@ -142,7 +166,8 @@ def String :
   WithParser <"succeeded({0}.readString({2}))",
   WithBuilder<"{1}",
   WithPrinter<"{0}.writeOwnedString({2})",
-  WithType   <"StringRef">>>>;
+  WithGetter <"{0}",
+  WithType   <"StringRef">>>>>;
 
 // enum AttributeCode {
 //  ///   ArrayAttr {
@@ -151,17 +176,19 @@ def String :
 //  ///
 //  kArrayAttr = 0,
 //
+def ArrayAttr : BuiltinDialectAttribute<(attr
+  Array<Attribute>:$value
+)>;
 
 let cType = "StringAttr" in {
 //  ///   StringAttr {
 //  ///     value: string
 //  ///   }
 //  kStringAttr = 2,
-def StringAttr : BuiltinDialectAttribute</*enum=*/2, (attr
+def StringAttr : BuiltinDialectAttribute<(attr
   String:$value
 )> {
   let printerPredicate = "{0}.getType().isa<NoneType>()";
-  let cBuilder = "StringAttr::get(context, {1})";
 }
 
 //  ///   StringAttrWithType {
@@ -170,7 +197,7 @@ def StringAttr : BuiltinDialectAttribute</*enum=*/2, (attr
 //  ///   }
 //  /// A variant of StringAttr with a type.
 //  kStringAttrWithType = 3,
-def StringAttrWithType : BuiltinDialectAttribute</*enum=*/3, (attr
+def StringAttrWithType : BuiltinDialectAttribute<(attr
   String:$value,
   Type:$type
 )> { let printerPredicate = "!{0}.getType().isa<NoneType>()"; }
@@ -187,10 +214,7 @@ def NamedAttribute : CompositeBytecode {
   );
   let cBuilder = "NamedAttribute({1})";
 }
-def DictionaryAttr : BuiltinDialectAttribute</*enum=*/1, (attr
-  // TODO: handle context constructors a bit nicer.
-  Context:$mlirContext,
-
+def DictionaryAttr : BuiltinDialectAttribute<(attr
   Array<NamedAttribute>:$value
 )>;
 
@@ -199,7 +223,7 @@ def DictionaryAttr : BuiltinDialectAttribute</*enum=*/1, (attr
 //  ///   }
 //  /// A variant of SymbolRefAttr with no leaf references.
 //  kFlatSymbolRefAttr = 4,
-def FlatSymbolRefAttr: BuiltinDialectAttribute</*enum=*/4, (attr
+def FlatSymbolRefAttr: BuiltinDialectAttribute<(attr
   StringAttr:$rootReference
 )>;
 
@@ -208,7 +232,7 @@ def FlatSymbolRefAttr: BuiltinDialectAttribute</*enum=*/4, (attr
 //  ///     leafReferences: FlatSymbolRefAttr[]
 //  ///   }
 //  kSymbolRefAttr = 5,
-def SymbolRefAttr: BuiltinDialectAttribute</*enum=*/5, (attr
+def SymbolRefAttr: BuiltinDialectAttribute<(attr
   StringAttr:$rootReference,
   Array<FlatSymbolRefAttr>:$nestedReferences
 )>;
@@ -217,24 +241,23 @@ def SymbolRefAttr: BuiltinDialectAttribute</*enum=*/5, (attr
 //  ///     value: Type
 //  ///   }
 //  kTypeAttr = 6,
-def TypeAttr: BuiltinDialectAttribute</*enum=*/6, (attr
+def TypeAttr: BuiltinDialectAttribute<(attr
   Type:$value
 )>;
 
 //  ///   UnitAttr {
 //  ///   }
 //  kUnitAttr = 7,
-def UnitAttr: BuiltinDialectAttribute</*enum=*/7, (attr)>;
+def UnitAttr: BuiltinDialectAttribute<(attr)>;
 
 //  ///   IntegerAttr {
 //  ///     type: Type
 //  ///     value: APInt,
 //  ///   }
 //  kIntegerAttr = 8,
-def IntegerAttr: BuiltinDialectAttribute</*enum=*/8, (attr
+def IntegerAttr: BuiltinDialectAttribute<(attr
   Type:$type,
-  LocalVar<"unsigned", "getIntegerBitWidth({0}, type)">:$_width,
-  KnownWidthAPInt<"_width">:$value
+  KnownWidthAPInt<"type">:$value
 )>;
 
 //
@@ -243,13 +266,20 @@ def IntegerAttr: BuiltinDialectAttribute</*enum=*/8, (attr
 //  ///     value: APFloat
 //  ///   }
 //  kFloatAttr = 9,
-//
+defvar FloatType = Type;
+def FloatAttr : BuiltinDialectAttribute<(attr
+  FloatType:$type,
+  KnownSemanticsAPFloat<"type">:$value
+)> {
+  let cBuilder = "get<{0}>(context, type, *value)";
+}
+
 //  ///   CallSiteLoc {
 //  ///    callee: LocationAttr,
 //  ///    caller: LocationAttr
 //  ///   }
 //  kCallSiteLoc = 10,
-def CallSiteLoc : BuiltinDialectAttribute</*enum=*/10, (attr
+def CallSiteLoc : BuiltinDialectAttribute<(attr
   LocationAttr:$callee,
   LocationAttr:$caller
 )>;
@@ -260,22 +290,22 @@ def CallSiteLoc : BuiltinDialectAttribute</*enum=*/10, (attr
 //  ///     column: varint
 //  ///   }
 //  kFileLineColLoc = 11,
-def FileLineColLoc : BuiltinDialectAttribute</*enum=*/11, (attr
+def FileLineColLoc : BuiltinDialectAttribute<(attr
   StringAttr:$filename,
   VarInt:$line,
   VarInt:$column
 )>;
 
-let cType = "FusedLoc" in {
+let cType = "FusedLoc",
+    cBuilder = "cast<FusedLoc>(get<FusedLoc>(context, {1}))" in {
 //  ///   FusedLoc {
 //  ///     locations: Location[]
 //  ///   }
 //  kFusedLoc = 12,
-def FusedLoc : BuiltinDialectAttribute</*enum=*/12, (attr
+def FusedLoc : BuiltinDialectAttribute<(attr
   Array<Location>:$locations
 )> {
   let printerPredicate = "!{0}.getMetadata()";
-  let cBuilder = "cast<FusedLoc>(FusedLoc::get(context, {1}))";
 }
 
 //  ///   FusedLocWithMetadata {
@@ -284,12 +314,11 @@ def FusedLoc : BuiltinDialectAttribute</*enum=*/12, (attr
 //  ///   }
 //  /// A variant of FusedLoc with metadata.
 //  kFusedLocWithMetadata = 13,
-def FusedLocWithMetadata : BuiltinDialectAttribute</*enum=*/13, (attr
+def FusedLocWithMetadata : BuiltinDialectAttribute<(attr
   Array<Location>:$locations,
   Attribute:$metadata
 )> {
   let printerPredicate = "{0}.getMetadata()";
-  let cBuilder = "cast<FusedLoc>(FusedLoc::get(context, {1}))";
 }
 }
 
@@ -298,7 +327,7 @@ def FusedLocWithMetadata : BuiltinDialectAttribute</*enum=*/13, (attr
 //  ///     childLoc: LocationAttr
 //  ///   }
 //  kNameLoc = 14,
-def NameLoc : BuiltinDialectAttribute</*enum=*/14, (attr
+def NameLoc : BuiltinDialectAttribute<(attr
   StringAttr:$name,
   LocationAttr:$childLoc
 )>;
@@ -306,39 +335,103 @@ def NameLoc : BuiltinDialectAttribute</*enum=*/14, (attr
 //  ///   UnknownLoc {
 //  ///   }
 //  kUnknownLoc = 15,
-def UnknownLoc : BuiltinDialectAttribute</*enum=*/15, (attr)>;
+def UnknownLoc : BuiltinDialectAttribute<(attr)>;
 
 //  ///   DenseResourceElementsAttr {
 //  ///     type: Type,
 //  ///     handle: ResourceHandle
 //  ///   }
 //  kDenseResourceElementsAttr = 16,
-//
+def DenseResourceElementsAttr : BuiltinDialectAttribute<(attr
+  Type:$type,
+  ResourceHandle<"DenseResourceElementsHandle">:$rawHandle
+)> {
+  // Note: order of serialization does not match order of builder.
+  let cBuilder = "get<{0}>(context, type, *rawHandle)";
+}
+
+let cType = "RankedTensorType" in {
+//   ///   RankedTensorType {
+//   ///     shape: svarint[],
+//   ///     elementType: Type,
+//   ///   }
+//   ///
+//   kRankedTensorType = 13,
+def RankedTensorType : BuiltinDialectType<(type
+  Array<SignedVarInt>:$shape,
+  Type:$elementType
+)> {
+  let printerPredicate = "!{0}.getEncoding()";
+}
+
+//   ///   RankedTensorTypeWithEncoding {
+//   ///     encoding: Attribute,
+//   ///     shape: svarint[],
+//   ///     elementType: Type
+//   ///   }
+//   /// Variant of RankedTensorType with an encoding.
+//   kRankedTensorTypeWithEncoding = 14,
+def RankedTensorTypeWithEncoding : BuiltinDialectType<(type
+  Attribute:$encoding,
+  Array<SignedVarInt>:$shape,
+  Type:$elementType
+)> {
+  let printerPredicate = "{0}.getEncoding()";
+  // Note: order of serialization does not match order of builder.
+  let cBuilder = "get<{0}>(context, shape, elementType, encoding)";
+}
+}
+
 //  ///   DenseArrayAttr {
 //  ///     type: RankedTensorType,
 //  ///     data: blob
 //  ///   }
 //  kDenseArrayAttr = 17,
-//
+def DenseArrayAttr : BuiltinDialectAttribute<(attr
+  RankedTensorType:$elementType,
+  VarInt:$size,
+  Blob:$rawData
+)>;
+
 //  ///   DenseIntOrFPElementsAttr {
 //  ///     type: ShapedType,
 //  ///     data: blob
 //  ///   }
 //  kDenseIntOrFPElementsAttr = 18,
-//
+defvar ShapedType = Type;
+def DenseElementsAttr : WithType<"DenseIntElementsAttr", Attribute>;
+def DenseIntOrFPElementsAttr : BuiltinDialectAttribute<(attr
+  ShapedType:$type,
+  Blob:$rawData
+)> {
+  let cBuilder = "cast<{0}>({0}::getFromRawBuffer({1}))";
+}
+
 //  ///   DenseStringElementsAttr {
 //  ///     type: ShapedType,
 //  ///     isSplat: varint,
 //  ///     data: string[]
 //  ///   }
 //  kDenseStringElementsAttr = 19,
-//
+def DenseStringElementsAttr : BuiltinDialectAttribute<(attr
+  ShapedType:$type,
+  // TODO: Wrong
+  WithGetter<"{0}.isSplat()", VarInt>:$_isSplat,
+  Array<String>:$rawStringData
+)>;
+
 //  ///   SparseElementsAttr {
 //  ///     type: ShapedType,
 //  ///     indices: DenseIntElementsAttr,
 //  ///     values: DenseElementsAttr
 //  ///   }
 //  kSparseElementsAttr = 20,
+def DenseIntElementsAttr : WithType<"DenseIntElementsAttr", Attribute>;
+def SparseElementsAttr : BuiltinDialectAttribute<(attr
+  ShapedType:$type,
+  DenseIntElementsAttr:$indices,
+  DenseElementsAttr:$values
+)>;
 
 // Types
 // -----
@@ -349,10 +442,7 @@ def UnknownLoc : BuiltinDialectAttribute</*enum=*/15, (attr)>;
 //   ///   }
 //   ///
 //   kIntegerType = 0,
-def IntegerType : BuiltinDialectType</*enum=*/0, (type
-  // TODO: handle context constructors a bit nicer.
-  Context:$mlirContext,
-
+def IntegerType : BuiltinDialectType<(type
   // Yes not pretty, 
   WithParser<"succeeded({0}.readVarInt({2}))",
     WithBuilder<"{1}",
@@ -369,7 +459,7 @@ def IntegerType : BuiltinDialectType</*enum=*/0, (type
 //   ///   }
 //   ///
 //   kIndexType = 1,
-def IndexType : BuiltinDialectType</*enum=*/1, (type)>;
+def IndexType : BuiltinDialectType<(type)>;
 
 //   ///   FunctionType {
 //   ///     inputs: Type[],
@@ -377,10 +467,7 @@ def IndexType : BuiltinDialectType</*enum=*/1, (type)>;
 //   ///   }
 //   ///
 //   kFunctionType = 2,
-def FunctionType : BuiltinDialectType</*enum=*/2, (type
-  // TODO: handle context constructors a bit nicer.
-  Context:$mlirContext,
-
+def FunctionType : BuiltinDialectType<(type
   Array<Type>:$inputs,
   Array<Type>:$results
 )>;
@@ -389,47 +476,48 @@ def FunctionType : BuiltinDialectType</*enum=*/2, (type
 //   ///   }
 //   ///
 //   kBFloat16Type = 3,
-def BFloat16Type : BuiltinDialectType</*enum=*/3, (type)>;
+def BFloat16Type : BuiltinDialectType<(type)>;
 
 //   ///   Float16Type {
 //   ///   }
 //   ///
 //   kFloat16Type = 4,
-def Float16Type : BuiltinDialectType</*enum=*/4, (type)>;
+def Float16Type : BuiltinDialectType<(type)>;
 
 //   ///   Float32Type {
 //   ///   }
 //   ///
 //   kFloat32Type = 5,
-def Float32Type : BuiltinDialectType</*enum=*/5, (type)>;
+def Float32Type : BuiltinDialectType<(type)>;
 
 //   ///   Float64Type {
 //   ///   }
 //   ///
 //   kFloat64Type = 6,
-def Float64Type : BuiltinDialectType</*enum=*/6, (type)>;
+def Float64Type : BuiltinDialectType<(type)>;
 
 //   ///   Float80Type {
 //   ///   }
 //   ///
 //   kFloat80Type = 7,
-def Float80Type : BuiltinDialectType</*enum=*/7, (type)>;
+def Float80Type : BuiltinDialectType<(type)>;
 
 //   ///   Float128Type {
 //   ///   }
 //   ///
 //   kFloat128Type = 8,
-def Float128Type : BuiltinDialectType</*enum=*/8, (type)>;
+def Float128Type : BuiltinDialectType<(type)>;
 
 //   ///   ComplexType {
 //   ///     elementType: Type
 //   ///   }
 //   ///
 //   kComplexType = 9,
-def ComplexType : BuiltinDialectType</*enum=*/9, (type
+def ComplexType : BuiltinDialectType<(type
   Type:$elementType
 )>;
 
+let cType = "MemRefType" in {
 //   ///   MemRefType {
 //   ///     shape: svarint[],
 //   ///     elementType: Type,
@@ -437,7 +525,14 @@ def ComplexType : BuiltinDialectType</*enum=*/9, (type
 //   ///   }
 //   ///
 //   kMemRefType = 10,
-// 
+def MemRefType : BuiltinDialectType<(type
+  Array<SignedVarInt>:$shape,
+  Type:$elementType,
+  Attribute:$layout
+)> {
+  let printerPredicate = "!{0}.getMemorySpace()";
+}
+
 //   ///   MemRefTypeWithMemSpace {
 //   ///     memorySpace: Attribute,
 //   ///     shape: svarint[],
@@ -446,68 +541,84 @@ def ComplexType : BuiltinDialectType</*enum=*/9, (type
 //   ///   }
 //   /// Variant of MemRefType with non-default memory space.
 //   kMemRefTypeWithMemSpace = 11,
-// 
+def MemRefTypeWithMemSpace : BuiltinDialectType<(type
+  Attribute:$memorySpace,
+  Array<SignedVarInt>:$shape,
+  Type:$elementType,
+  Attribute:$layout
+)> {
+  let printerPredicate = "!!{0}.getMemorySpace()";
+  // Note: order of serialization does not match order of builder.
+  let cBuilder = "get<{0}>(context, shape, elementType, layout, memorySpace)";
+}
+}
+
 //   ///   NoneType {
 //   ///   }
 //   ///
 //   kNoneType = 12,
-def NoneType : BuiltinDialectType</*enum=*/12, (type)>;
+def NoneType : BuiltinDialectType<(type)>;
 
-//   ///   RankedTensorType {
-//   ///     shape: svarint[],
-//   ///     elementType: Type,
-//   ///   }
-//   ///
-//   kRankedTensorType = 13,
-// 
-//   ///   RankedTensorTypeWithEncoding {
-//   ///     encoding: Attribute,
-//   ///     shape: svarint[],
-//   ///     elementType: Type
-//   ///   }
-//   /// Variant of RankedTensorType with an encoding.
-//   kRankedTensorTypeWithEncoding = 14,
-// 
 //   ///   TupleType {
 //   ///     elementTypes: Type[]
 //   ///   }
 //   kTupleType = 15,
-def TupleType : BuiltinDialectType</*enum=*/15, (type
-  // TODO: handle context constructors a bit nicer.
-  Context:$mlirContext,
-
+def TupleType : BuiltinDialectType<(type
   Array<Type>:$types
 )>;
 
+let cType = "UnrankedMemRefType" in {
 //   ///   UnrankedMemRefType {
-//   ///     shape: svarint[]
+//   ///     elementType: Type
 //   ///   }
 //   ///
 //   kUnrankedMemRefType = 16,
-// 
+def UnrankedMemRefType : BuiltinDialectType<(type
+  Type:$elementType
+)> {
+  let printerPredicate = "!{0}.getMemorySpace()";
+  let cBuilder = "get<{0}>(context, elementType, Attribute())";
+}
+
 //   ///   UnrankedMemRefTypeWithMemSpace {
 //   ///     memorySpace: Attribute,
-//   ///     shape: svarint[]
+//   ///     elementType: Type
 //   ///   }
 //   /// Variant of UnrankedMemRefType with non-default memory space.
 //   kUnrankedMemRefTypeWithMemSpace = 17,
-// 
+def UnrankedMemRefTypeWithMemSpace : BuiltinDialectType<(type
+  Attribute:$memorySpace,
+  Type:$elementType
+)> {
+  let printerPredicate = "{0}.getMemorySpace()";
+  // Note: order of serialization does not match order of builder.
+  let cBuilder = "get<{0}>(context, elementType, memorySpace)";
+}
+}
+
 //   ///   UnrankedTensorType {
 //   ///     elementType: Type
 //   ///   }
 //   ///
 //   kUnrankedTensorType = 18,
-def UnrankedTensorType : BuiltinDialectType</*enum=*/18, (type
+def UnrankedTensorType : BuiltinDialectType<(type
   Type:$elementType
 )>;
 
+let cType = "VectorType" in {
 //   ///   VectorType {
 //   ///     shape: svarint[],
 //   ///     elementType: Type
 //   ///   }
 //   ///
 //   kVectorType = 19,
-// 
+def VectorType : BuiltinDialectType<(type
+  Array<SignedVarInt>:$shape,
+  Type:$elementType
+)> {
+  let printerPredicate = "!{0}.getNumScalableDims()";
+}
+
 //   ///   VectorTypeWithScalableDims {
 //   ///     numScalableDims: varint,
 //   ///     shape: svarint[],
@@ -515,3 +626,65 @@ def UnrankedTensorType : BuiltinDialectType</*enum=*/18, (type
 //   ///   }
 //   /// Variant of VectorType with scalable dimensions.
 //   kVectorTypeWithScalableDims = 20,
+def VectorTypeWithScalableDims : BuiltinDialectType<(type
+  VarInt:$numScalableDims,
+  Array<SignedVarInt>:$shape,
+  Type:$elementType
+)> {
+  let printerPredicate = "!{0}.getNumScalableDims()";
+  // Note: order of serialization does not match order of builder.
+  let cBuilder = "get<{0}>(context, shape, elementType, numScalableDims)";
+}
+}
+
+def BuiltinDialectAttributes : DialectAttributes<"Builtin"> {
+  let elems = [
+    ArrayAttr,
+    DictionaryAttr,
+    StringAttr,
+    StringAttrWithType,
+    FlatSymbolRefAttr,
+    SymbolRefAttr,
+    TypeAttr,
+    UnitAttr,
+    IntegerAttr,
+    FloatAttr,
+    CallSiteLoc,
+    FileLineColLoc,
+    FusedLoc,
+    FusedLocWithMetadata,
+    NameLoc,
+    UnknownLoc,
+    DenseResourceElementsAttr,
+    DenseArrayAttr,
+    DenseIntOrFPElementsAttr,
+    DenseStringElementsAttr,
+    SparseElementsAttr
+  ];
+}
+
+def BuiltinDialectTypes : DialectTypes<"Builtin"> {
+  let elems = [
+    IntegerType,
+    IndexType,
+    FunctionType,
+    BFloat16Type,
+    Float16Type,
+    Float32Type,
+    Float64Type,
+    Float80Type,
+    Float128Type,
+    ComplexType,
+    MemRefType,
+    MemRefTypeWithMemSpace,
+    NoneType,
+    RankedTensorType,
+    RankedTensorTypeWithEncoding,
+    TupleType,
+    UnrankedMemRefType,
+    UnrankedMemRefTypeWithMemSpace,
+    UnrankedTensorType,
+    VectorType,
+    VectorTypeWithScalableDims
+  ];
+}

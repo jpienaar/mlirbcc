@@ -130,9 +130,9 @@ void Generator::emitParseDispatch(StringRef kind, ArrayRef<Record *> vec) {
   os << "switch (kind) ";
   {
     auto switchScope = os.scope("{\n", "}\n");
-    for (auto it : vec) {
+    for (auto it : llvm::enumerate(vec)) {
       os << formatv("case /* {0} */ {1}:\n  return read{0}(context, reader);\n",
-                    it->getName(), it->getValueAsInt("enum"));
+                    it.value()->getName(), it.index());
     }
     os << "default:\n"
        << "  reader.emitError() << \"unknown builtin attribute code: \" "
@@ -157,6 +157,7 @@ void Generator::emitParse(StringRef kind, Record &attr) {
   StringRef builder = attr.getValueAsString("cBuilder");
   emitParseHelper(kind, returnType, builder, members->getArgs(), argNames,
                   returnType + "()", ios);
+  ios << "\n\n";
 }
 
 void Generator::emitParseHelper(StringRef kind, StringRef returnType,
@@ -164,10 +165,10 @@ void Generator::emitParseHelper(StringRef kind, StringRef returnType,
                                 ArrayRef<std::string> argNames,
                                 StringRef failure,
                                 mlir::raw_indented_ostream &ios) {
-  auto funScope = ios.scope("{\n", "}\n\n");
+  auto funScope = ios.scope("{\n", "}");
 
   if (args.empty()) {
-    ios << formatv("return {0}::get(context);\n", returnType);
+    ios << formatv("return get<{0}>(context);\n", returnType);
     return;
   }
 
@@ -227,7 +228,7 @@ void Generator::emitParseHelper(StringRef kind, StringRef returnType,
     StringRef builder = def->getValueAsString("cBuilder");
     emitParseHelper(kind, returnType, builder, args, argNames, "failure()",
                     ios);
-    ios << ";";
+    ios << ";\n";
   }
 
   // Print parse conditional.
@@ -314,15 +315,16 @@ void Generator::emitPrint(StringRef kind, StringRef type,
     }
   }
 
-  for (Record *rec : vec) {
+  for (auto it : enumerate(vec)) {
+    Record *rec = it.value();
     StringRef pred = rec->getValueAsString("printerPredicate");
     if (!pred.empty()) {
       ios << "if (" << formatv(pred.str().c_str(), kind) << ") {\n";
       ios.indent();
     }
 
-    ios << "writer.writeVarInt(/* " << rec->getName() << " */ "
-        << rec->getValueAsInt("enum") << ");\n";
+    ios << "writer.writeVarInt(/* " << rec->getName() << " */ " << it.value()
+        << ");\n";
 
     auto members = rec->getValueAsDag("members");
     for (auto [arg, name] :
@@ -413,28 +415,24 @@ struct AttrOrType {
 
 static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
   MapVector<StringRef, AttrOrType> dialectAttrOrType;
-  Record *attr = records.getClass("DialectAttribute");
-  Record *type = records.getClass("DialectType");
-  for (auto &it : records.getAllDerivedDefinitions("DialectAttrOrType")) {
+  for (auto &it : records.getAllDerivedDefinitions("DialectAttributes")) {
     if (!selectedDialect.empty() &&
         it->getValueAsString("dialect") != selectedDialect)
       continue;
-
-    if (it->isSubClassOf(attr)) {
-      dialectAttrOrType[it->getValueAsString("dialect")].attr.push_back(it);
-    } else if (it->isSubClassOf(type)) {
-      dialectAttrOrType[it->getValueAsString("dialect")].type.push_back(it);
-    }
+    dialectAttrOrType[it->getValueAsString("dialect")].attr =
+        it->getValueAsListOfDefs("elems");
+  }
+  for (auto &it : records.getAllDerivedDefinitions("DialectTypes")) {
+    if (!selectedDialect.empty() &&
+        it->getValueAsString("dialect") != selectedDialect)
+      continue;
+    dialectAttrOrType[it->getValueAsString("dialect")].type =
+        it->getValueAsListOfDefs("elems");
   }
 
   if (dialectAttrOrType.size() != 1)
     return reportError("Single dialect per invocation required (either only "
                        "one in input file or specified via dialect option)");
-
-  // Compare two records by enum value.
-  auto compEnum = [](Record *lhs, Record *rhs) -> int {
-    return lhs->getValueAsInt("enum") < rhs->getValueAsInt("enum");
-  };
 
   auto mainFile =
       std::filesystem::path(records.getInputFilename()).remove_filename();
@@ -451,7 +449,6 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
   kinds.push_back("type");
   for (auto [vec, kind] : zip(vecs, kinds)) {
     // Handle Attribute emission.
-    std::sort(vec->begin(), vec->end(), compEnum);
     std::map<std::string, std::vector<Record *>> perType;
     for (auto kt : *vec)
       perType[getCType(kt)].push_back(kt);
