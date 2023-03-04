@@ -1,4 +1,4 @@
-//===- bc-tblgen.cpp - TableGen helper for MLIR bytecode ------------------===//
+//===- mlir-bc-tblgen.cpp - TableGen helper for MLIR bytecode -------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -215,7 +215,7 @@ void Generator::emitParseHelper(StringRef kind, StringRef returnType,
     SmallVector<Init *> args;
     SmallVector<std::string> argNames;
     if (def->isSubClassOf("CompositeBytecode")) {
-      auto members = def->getValueAsDag("members");
+      DagInit *members = def->getValueAsDag("members");
       args = llvm::to_vector(members->getArgs());
       argNames = llvm::to_vector(
           map_range(members->getArgNames(), [](StringInit *init) {
