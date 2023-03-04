@@ -130,7 +130,7 @@ void Generator::emitParseDispatch(StringRef kind, ArrayRef<Record *> vec) {
   os << "switch (kind) ";
   {
     auto switchScope = os.scope("{\n", "}\n");
-    for (auto it : llvm::enumerate(vec)) {
+    for (const auto& it : llvm::enumerate(vec)) {
       os << formatv("case /* {0} */ {1}:\n  return read{0}(context, reader);\n",
                     it.value()->getName(), it.index());
     }
@@ -142,19 +142,19 @@ void Generator::emitParseDispatch(StringRef kind, ArrayRef<Record *> vec) {
   os << "return " << capitalize(kind) << "();\n";
 }
 
-void Generator::emitParse(StringRef kind, Record &attr) {
+void Generator::emitParse(StringRef kind, Record &x) {
   char const *head =
       R"(static {0} read{1}(MLIRContext* context, DialectBytecodeReader &reader) )";
   raw_string_ostream os(bottomStr);
   mlir::raw_indented_ostream ios(os);
-  std::string returnType = getCType(&attr);
-  ios << formatv(head, returnType, attr.getName());
-  DagInit *members = attr.getValueAsDag("members");
+  std::string returnType = getCType(&x);
+  ios << formatv(head, returnType,x.getName());
+  DagInit *members =x.getValueAsDag("members");
   SmallVector<std::string> argNames =
       llvm::to_vector(map_range(members->getArgNames(), [](StringInit *init) {
         return init->getAsUnquotedString();
       }));
-  StringRef builder = attr.getValueAsString("cBuilder");
+  StringRef builder =x.getValueAsString("cBuilder");
   emitParseHelper(kind, returnType, builder, members->getArgs(), argNames,
                   returnType + "()", ios);
   ios << "\n\n";
@@ -315,7 +315,7 @@ void Generator::emitPrint(StringRef kind, StringRef type,
     }
   }
 
-  for (auto it : enumerate(vec)) {
+  for (const auto& it : enumerate(vec)) {
     Record *rec = it.value();
     StringRef pred = rec->getValueAsString("printerPredicate");
     if (!pred.empty()) {
@@ -452,7 +452,7 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
     std::map<std::string, std::vector<Record *>> perType;
     for (auto kt : *vec)
       perType[getCType(kt)].push_back(kt);
-    for (auto jt : perType) {
+    for (const auto& jt : perType) {
       for (auto kt : jt.second)
         gen.emitParse(kind, *kt);
       gen.emitPrint(kind, jt.first, jt.second);
@@ -460,7 +460,7 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
     gen.emitParseDispatch(kind, *vec);
 
     SmallVector<std::string> types;
-    for (auto it : perType) {
+    for (const auto& it : perType) {
       types.push_back(it.first);
     }
     gen.emitPrintDispatch(kind, types);
