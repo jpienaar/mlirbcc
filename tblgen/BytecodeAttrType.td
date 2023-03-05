@@ -82,17 +82,17 @@ class KnownWidthAPInt<string s> :
   WithParser <"succeeded(readAPIntWithKnownWidth({0}, " # s # ", {2}))",
   WithBuilder<"{1}",
   WithPrinter<"{0}.writeAPIntWithKnownWidth({2})",
-  WithType   <"APInt">>>>;
+  WithType   <"FailureOr<APInt>">>>>;
 class KnownSemanticsAPFloat<string s> :
-  WithParser <"succeeded(readAPFloatWithKnownSemantics({0}, " # s # ", *{2}))",
+  WithParser <"succeeded(readAPFloatWithKnownSemantics({0}, " # s # ", {2}))",
   WithBuilder<"{1}",
   WithPrinter<"{0}.writeAPFloatWithKnownSemantics({2})",
-  WithType   <"std::optional<APFloat>">>>>;
+  WithType   <"FailureOr<APFloat>">>>>;
 class ResourceHandle<string s> :
-  WithParser <"succeeded(readResourceHandle<" # s # ">({0}, *{2}))",
+  WithParser <"succeeded(readResourceHandle<" # s # ">({0}, {2}))",
   WithBuilder<"{1}",
   WithPrinter<"{0}.writeResourceHandle({2})",
-  WithType   <"std::optional<" # s # ">">>>>;
+  WithType   <"FailureOr<" # s # ">">>>>;
 
 // Helper to define variable that is defined later but not parsed nor printed.
 class LocalVar<string t, string d> :
@@ -258,7 +258,9 @@ def UnitAttr: BuiltinDialectAttribute<(attr)>;
 def IntegerAttr: BuiltinDialectAttribute<(attr
   Type:$type,
   KnownWidthAPInt<"type">:$value
-)>;
+)> {
+  let cBuilder = "get<{0}>(context, type, *value)";
+}
 
 //
 //  ///   FloatAttr {
@@ -383,12 +385,13 @@ def RankedTensorTypeWithEncoding : BuiltinDialectType<(type
 }
 
 //  ///   DenseArrayAttr {
-//  ///     type: RankedTensorType,
+//  ///     elementType: Type,
+//  ///     size: varint
 //  ///     data: blob
 //  ///   }
 //  kDenseArrayAttr = 17,
 def DenseArrayAttr : BuiltinDialectAttribute<(attr
-  RankedTensorType:$elementType,
+  Type:$elementType,
   VarInt:$size,
   Blob:$rawData
 )>;
@@ -415,9 +418,11 @@ def DenseIntOrFPElementsAttr : BuiltinDialectAttribute<(attr
 //  kDenseStringElementsAttr = 19,
 def DenseStringElementsAttr : BuiltinDialectAttribute<(attr
   ShapedType:$type,
-  // TODO: Wrong
   WithGetter<"{0}.isSplat()", VarInt>:$_isSplat,
-  Array<String>:$rawStringData
+  WithBuilder<"{1}",
+    WithType<"SmallVector<StringRef>",
+    WithParser <"succeeded(readPotentiallySplatString({0}, type, _isSplat, {2}))",
+    WithPrinter<"writePotentiallySplatString({0}, {1})">>>>:$rawStringData
 )>;
 
 //  ///   SparseElementsAttr {
@@ -631,7 +636,7 @@ def VectorTypeWithScalableDims : BuiltinDialectType<(type
   Array<SignedVarInt>:$shape,
   Type:$elementType
 )> {
-  let printerPredicate = "!{0}.getNumScalableDims()";
+  let printerPredicate = "{0}.getNumScalableDims()";
   // Note: order of serialization does not match order of builder.
   let cBuilder = "get<{0}>(context, shape, elementType, numScalableDims)";
 }

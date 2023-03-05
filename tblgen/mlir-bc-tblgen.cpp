@@ -37,19 +37,13 @@ static int reportError(Twine Msg) {
 // Helper class to generate C++ bytecode parser helpers.
 class Generator {
 public:
-  Generator(StringRef dialectName) : dialectName(dialectName) {}
-
-  // Returns whether successfully created output dirs/files.
-  void init(const std::filesystem::path &mainFileRoot);
-
-  // Returns whether successfully terminated output files.
-  void fin(raw_ostream &os);
+  Generator(raw_ostream& output) : output(output) {}
 
   // Returns whether successfully emitted attribute/type parsers.
   void emitParse(StringRef kind, Record &x);
 
   // Returns whether successfully emitted attribute/type printers.
-  void emitPrint(StringRef kind, StringRef type, ArrayRef<Record *> vec);
+  void emitPrint(StringRef kind, StringRef type, ArrayRef<std::pair<int64_t, Record *>> vec);
 
   // Emits parse dispatch table.
   void emitParseDispatch(StringRef kind, ArrayRef<Record *> vec);
@@ -67,32 +61,8 @@ private:
   void emitPrintHelper(Record *memberRec, StringRef kind, StringRef parent,
                        StringRef name, mlir::raw_indented_ostream &ios);
 
-  StringRef dialectName;
-  std::string topStr, bottomStr;
+  raw_ostream& output;
 };
-
-void Generator::init(const std::filesystem::path &mainFileRoot) {
-  // Generate top section.
-  raw_string_ostream os(topStr);
-
-  // Inject additional header include file.
-  auto incHeaderFileName =
-      mainFileRoot / formatv("{0}Inc.h", dialectName).str();
-  if (std::filesystem::exists(incHeaderFileName)) {
-    auto incFileOr =
-        MemoryBuffer::getFile(incHeaderFileName.string(), /*IsText=*/true,
-                              /*RequiresNullTerminator=*/false);
-    if (incFileOr) {
-      os << incFileOr->get()->getBuffer() << "\n";
-    } else {
-      PrintFatalError("FAILURE: " + incFileOr.getError().message());
-    }
-  }
-}
-
-void Generator::fin(raw_ostream &os) {
-  os << topStr << "\n" << StringRef(bottomStr).rtrim() << "\n";
-}
 
 static std::string capitalize(StringRef str) {
   return ((Twine)toUpper(str[0]) + str.drop_front()).str();
@@ -117,8 +87,7 @@ std::string getCType(Record *def) {
 }
 
 void Generator::emitParseDispatch(StringRef kind, ArrayRef<Record *> vec) {
-  raw_string_ostream sos(bottomStr);
-  mlir::raw_indented_ostream os(sos);
+  mlir::raw_indented_ostream os(output);
   char const *head =
       R"(static {0} read{0}(MLIRContext* context, DialectBytecodeReader &reader))";
   os << formatv(head, capitalize(kind));
@@ -145,10 +114,9 @@ void Generator::emitParseDispatch(StringRef kind, ArrayRef<Record *> vec) {
 void Generator::emitParse(StringRef kind, Record &x) {
   char const *head =
       R"(static {0} read{1}(MLIRContext* context, DialectBytecodeReader &reader) )";
-  raw_string_ostream os(bottomStr);
-  mlir::raw_indented_ostream ios(os);
+  mlir::raw_indented_ostream os(output);
   std::string returnType = getCType(&x);
-  ios << formatv(head, returnType,x.getName());
+  os << formatv(head, returnType,x.getName());
   DagInit *members =x.getValueAsDag("members");
   SmallVector<std::string> argNames =
       llvm::to_vector(map_range(members->getArgNames(), [](StringInit *init) {
@@ -156,8 +124,8 @@ void Generator::emitParse(StringRef kind, Record &x) {
       }));
   StringRef builder =x.getValueAsString("cBuilder");
   emitParseHelper(kind, returnType, builder, members->getArgs(), argNames,
-                  returnType + "()", ios);
-  ios << "\n\n";
+                  returnType + "()", os);
+  os << "\n\n";
 }
 
 void Generator::emitParseHelper(StringRef kind, StringRef returnType,
@@ -293,19 +261,19 @@ void Generator::emitParseHelper(StringRef kind, StringRef returnType,
 }
 
 void Generator::emitPrint(StringRef kind, StringRef type,
-                          ArrayRef<Record *> vec) {
+ArrayRef<std::pair<int64_t, Record *>> vec) {
   char const *head =
       R"(static void write({0} {1}, DialectBytecodeWriter &writer) )";
-  raw_string_ostream os(bottomStr);
-  mlir::raw_indented_ostream ios(os);
-  ios << formatv(head, type, kind);
-  auto funScope = ios.scope("{\n", "}\n\n");
+  mlir::raw_indented_ostream os(output);
+  os << formatv(head, type, kind);
+  auto funScope = os.scope("{\n", "}\n\n");
 
   // Check that predicates specified if multiple bytecode instances.
-  for (Record *rec : vec) {
+  for (auto [index, rec] : vec) {
     StringRef pred = rec->getValueAsString("printerPredicate");
     if (vec.size() > 1 && pred.empty()) {
-      for (Record *rec : vec) {
+      for (auto [index, rec] : vec) {
+        (void)index;
         StringRef pred = rec->getValueAsString("printerPredicate");
         if (vec.size() > 1 && pred.empty())
           PrintError(rec->getLoc(),
@@ -315,15 +283,14 @@ void Generator::emitPrint(StringRef kind, StringRef type,
     }
   }
 
-  for (const auto& it : enumerate(vec)) {
-    Record *rec = it.value();
+  for (auto [index, rec] : vec) {
     StringRef pred = rec->getValueAsString("printerPredicate");
     if (!pred.empty()) {
-      ios << "if (" << formatv(pred.str().c_str(), kind) << ") {\n";
-      ios.indent();
+      os << "if (" << formatv(pred.str().c_str(), kind) << ") {\n";
+      os.indent();
     }
 
-    ios << "writer.writeVarInt(/* " << rec->getName() << " */ " << it.value()
+    os << "writer.writeVarInt(/* " << rec->getName() << " */ " << index
         << ");\n";
 
     auto members = rec->getValueAsDag("members");
@@ -332,12 +299,12 @@ void Generator::emitPrint(StringRef kind, StringRef type,
       DefInit *def = dyn_cast<DefInit>(arg);
       assert(def);
       Record *memberRec = def->getDef();
-      emitPrintHelper(memberRec, kind, kind, name->getAsUnquotedString(), ios);
+      emitPrintHelper(memberRec, kind, kind, name->getAsUnquotedString(), os);
     }
 
     if (!pred.empty()) {
-      ios.unindent();
-      ios << "}\n";
+      os.unindent();
+      os << "}\n";
     }
   }
 }
@@ -391,8 +358,7 @@ void Generator::emitPrintHelper(Record *memberRec, StringRef kind,
 }
 
 void Generator::emitPrintDispatch(StringRef kind, ArrayRef<std::string> vec) {
-  raw_string_ostream sos(bottomStr);
-  mlir::raw_indented_ostream os(sos);
+  mlir::raw_indented_ostream os(output);
   char const *head = R"(static LogicalResult write{0}({0} {1},
                                 DialectBytecodeWriter &writer))";
   os << formatv(head, capitalize(kind), kind);
@@ -434,12 +400,8 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
     return reportError("Single dialect per invocation required (either only "
                        "one in input file or specified via dialect option)");
 
-  auto mainFile =
-      std::filesystem::path(records.getInputFilename()).remove_filename();
-
   auto it = dialectAttrOrType.front();
-  Generator gen(it.first);
-  gen.init(mainFile);
+  Generator gen(os);
 
   SmallVector<std::vector<Record *> *, 2> vecs;
   SmallVector<std::string, 2> kinds;
@@ -448,13 +410,14 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
   vecs.push_back(&it.second.type);
   kinds.push_back("type");
   for (auto [vec, kind] : zip(vecs, kinds)) {
-    // Handle Attribute emission.
-    std::map<std::string, std::vector<Record *>> perType;
-    for (auto kt : *vec)
-      perType[getCType(kt)].push_back(kt);
+    // Handle Attribute/Type emission.
+    std::map<std::string,
+      std::vector<std::pair<int64_t, Record *>>> perType;
+    for (auto kt : llvm::enumerate(*vec))
+      perType[getCType(kt.value())].emplace_back(kt.index(), kt.value());
     for (const auto& jt : perType) {
       for (auto kt : jt.second)
-        gen.emitParse(kind, *kt);
+        gen.emitParse(kind, *std::get<1>(kt));
       gen.emitPrint(kind, jt.first, jt.second);
     }
     gen.emitParseDispatch(kind, *vec);
@@ -465,7 +428,6 @@ static bool tableGenMain(raw_ostream &os, RecordKeeper &records) {
     }
     gen.emitPrintDispatch(kind, types);
   }
-  gen.fin(os);
 
   return false;
 }
