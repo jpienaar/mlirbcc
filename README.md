@@ -96,6 +96,7 @@ flowchart LR;
 flowchart LR
     id1(Torch) --> id2(TCP) --> id3(cuDNN) --> id4(LLVM);
     id2 --> id5(Linalg) --> id4;
+    id2 --> id6{{cuDNN / Linalg}} --> id4;    
 ```
 
 ### Structure
