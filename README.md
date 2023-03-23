@@ -94,7 +94,8 @@ flowchart LR;
 
 ```mermaid
 flowchart LR
-    id1(Torch) --> id2{TCP} --> id3{cuDNN / Linalg} --> id4{LLVM};
+    id1(Torch) --> id2(TCP) --> id3(cuDNN) --> id4(LLVM);
+    id2 --> id5(Linalg) --> id4;
 ```
 
 ### Structure
