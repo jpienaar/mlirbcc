@@ -93,8 +93,8 @@ flowchart LR;
 ```
 
 ```mermaid
-flowchart TD;
-  Torch --> TCP --> cuDNN / Linalg --> LLVM
+flowchart LR
+    id1(This is the text in the box)
 ```
 
 ### Structure
