@@ -73,6 +73,30 @@ where
 
 * `$PREFIX` is the install directory for MLIR;
 
+```mermaid
+graph TD;
+  Torch --> TCP --> cuDNN / Linalg --> LLVM
+```
+
+```mermaid
+graph TD;
+  Torch --> TCP;
+  TCP --> cuDNN / Linalg;
+  cuDNN / Linalg --> LLVM
+```
+
+```mermaid
+flowchart LR;
+  Torch --> TCP;
+  TCP --> cuDNN / Linalg;
+  cuDNN / Linalg --> LLVM
+```
+
+```mermaid
+flowchart TD;
+  Torch --> TCP --> cuDNN / Linalg --> LLVM
+```
+
 ### Structure
 
 - `Parse.h` is the bytecode parsers (see its header for how to instantiate implementation);
