@@ -94,7 +94,7 @@ flowchart LR;
 
 ```mermaid
 flowchart LR
-    id1(This is the text in the box) --> id2 --> id3;
+    id1(Torch) --> id2{TCP} --> id3{cuDNN / Linalg} --> id4{LLVM};
 ```
 
 ### Structure
