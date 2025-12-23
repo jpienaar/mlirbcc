@@ -583,6 +583,31 @@ mlirBytecodeDialectOpCallBack(void *context, MlirBytecodeOpHandle opHdl,
   return mlirBytecodeSuccess();
 }
 
+MlirBytecodeStatus
+mlirBytecodeDialectVersionCallBack(void *context,
+                                   MlirBytecodeDialectHandle dialectHandle,
+                                   MlirBytecodeBytesRef version) {
+  printf("\t\tdialect[%d] version = (%" PRIu64 " bytes)\n",
+         (int)dialectHandle.id, version.length);
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus
+mlirBytecodeDialectOpWithRegisteredCallBack(void *context,
+                                            MlirBytecodeOpHandle opHdl,
+                                            MlirBytecodeDialectHandle dialectHandle,
+                                            MlirBytecodeStringHandle stringHdl,
+                                            bool isRegistered) {
+  ParsingState *state = context;
+  mlirBytecodeEmitDebug("\t\tdialect[%d] :: op[%d] = %d (registered=%d)",
+                        (int)dialectHandle.id, (int)opHdl.id, (int)stringHdl.id,
+                        isRegistered);
+
+  state->ops[opHdl.id] =
+      (MlirBytecodeOpRef){.dialect = dialectHandle, .op = stringHdl};
+  return mlirBytecodeSuccess();
+}
+
 MlirBytecodeStatus mlirBytecodeDialectsPush(void *context,
                                             MlirBytecodeSize total) {
   ParsingState *state = context;
@@ -733,6 +758,42 @@ mlirBytecodeOperationRegionPop(void *context,
   return mlirBytecodeSuccess();
 }
 
+// Lazy loading callbacks these are no-ops since the printer doesn't support lazy loading.
+
+void mlirBytecodeStoreDeferredRegionData(
+    void *context, MlirBytecodeOperationHandle opHandle,
+    const uint8_t *data, uint64_t length) {
+  // No-op: printer doesn't use lazy loading.
+}
+
+uint64_t mlirBytecodeGetOperationNumRegions(
+    MlirBytecodeOperationHandle opHandle) {
+  // Printer operations don't track regions.
+  return 0;
+}
+
+bool mlirBytecodeOperationWasLazyLoaded(void *context,
+                                        MlirBytecodeOperationHandle opHandle) {
+  // Printer never uses lazy loading.
+  return false;
+}
+
+// Use-list ordering callbacks these are no-ops since the printer doesn't reorder use-lists.
+
+MlirBytecodeStatus mlirBytecodeBlockArgAddUseListOrder(
+    void *context, uint64_t valueIndex, bool indexPairEncoding,
+    const uint64_t *indices, uint64_t numIndices) {
+  // No-op: printer doesn't track use-list ordering
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus mlirBytecodeResultAddUseListOrder(
+    void *context, MlirBytecodeOperationHandle op, uint64_t resultIndex,
+    bool indexPairEncoding, const uint64_t *indices, uint64_t numIndices) {
+  // No-op: printer doesn't track use-list ordering
+  return mlirBytecodeSuccess();
+}
+
 MlirBytecodeStatus mlirBytecodeOperationStateAddAttributeDictionary(
     void *context, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeAttrHandle attrs) {
@@ -853,6 +914,13 @@ MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessor(
   return mlirBytecodeSuccess();
 }
 
+MlirBytecodeStatus mlirBytecodeOperationStateAddProperties(
+    void *context, MlirBytecodeOperationStateHandle opStateHandle,
+    MlirBytecodeHandle propertiesIndex) {
+  printf(" <props:%" PRIu64 ">", propertiesIndex.id);
+  return mlirBytecodeSuccess();
+}
+
 MlirBytecodeStatus
 mlirBytecodeOperationStatePop(void *context,
                               MlirBytecodeOperationStateHandle opStateHandle,
@@ -906,6 +974,13 @@ mlirBytecodeResourceStringCallBack(void *context,
                                    MlirBytecodeStringHandle strHandle) {
   printf("\t\tstring resource %s = %s\n", getString(context, resourceKey).data,
          getString(context, strHandle).data);
+  return mlirBytecodeSuccess();
+}
+
+MlirBytecodeStatus
+mlirBytecodeResourceEmptyCallBack(void *context,
+                                  MlirBytecodeStringHandle resourceKey) {
+  printf("\t\tempty resource %s\n", getString(context, resourceKey).data);
   return mlirBytecodeSuccess();
 }
 

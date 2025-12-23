@@ -31,9 +31,9 @@
 #include <stdint.h>
 #include <string.h>
 
-// FIXME
-#define MLIRBC_DEBUG
-#define MLIRBC_VERBOSE_ERROR
+// Debug output disabled for production use
+// #define MLIRBC_DEBUG
+// #define MLIRBC_VERBOSE_ERROR  // Required for proper error diagnostics
 
 #if defined(MLIRBC_DEBUG) || defined(MLIRBC_VERBOSE_ERROR)
 #include <stdarg.h>
@@ -121,11 +121,29 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddSuccessor(
     void *context, MlirBytecodeOperationStateHandle,
     MlirBytecodeHandle successor);
 
+/// Called when adding properties to operation state (version 5+).
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStateAddProperties(
+    void *context, MlirBytecodeOperationStateHandle,
+    MlirBytecodeHandle propertiesIndex);
+
 /// Called when finalizing population all operation state excluding
 /// regions/blocks.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePop(
     void *context, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeOperationHandle *opHandle);
+
+/// Check if an operation was lazily loaded (regions deferred for later parsing).
+MLIRBC_DEF bool mlirBytecodeOperationWasLazyLoaded(
+    void *context, MlirBytecodeOperationHandle opHandle);
+
+/// Store deferred region IR data for later materialization.
+MLIRBC_DEF void mlirBytecodeStoreDeferredRegionData(
+    void *context, MlirBytecodeOperationHandle opHandle,
+    const uint8_t *data, uint64_t length);
+
+/// Get the number of regions in an operation.
+MLIRBC_DEF uint64_t mlirBytecodeGetOperationNumRegions(
+    MlirBytecodeOperationHandle opHandle);
 
 /// Called when entering a region with numBlocks blocks and numValues Values
 /// (including values due to block args).
@@ -141,6 +159,20 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationBlockPush(
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationBlockAddArgument(
     void *context, MlirBytecodeOperationHandle, MlirBytecodeTypeHandle,
     MlirBytecodeLocHandle);
+
+/// Called to add use-list order for a block argument.
+/// - valueIndex: index of the value within current scope
+/// - indexPairEncoding: if true, indices are (src, dst) pairs
+/// - indices: array of use-list order indices
+/// - numIndices: number of indices
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeBlockArgAddUseListOrder(
+    void *context, uint64_t valueIndex, bool indexPairEncoding,
+    const uint64_t *indices, uint64_t numIndices);
+
+/// Called to add use-list order for an operation result.
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResultAddUseListOrder(
+    void *context, MlirBytecodeOperationHandle op, uint64_t resultIndex,
+    bool indexPairEncoding, const uint64_t *indices, uint64_t numIndices);
 
 /// Called when exiting the block.
 MLIRBC_DEF MlirBytecodeStatus
@@ -185,6 +217,15 @@ mlirBytecodeDialectOpNames(void *context, MlirBytecodeSize numOps);
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeDialectOpCallBack(
     void *context, MlirBytecodeOpHandle, MlirBytecodeDialectHandle,
     MlirBytecodeStringHandle);
+
+/// Invoked with dialect version information (version 1+).
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeDialectVersionCallBack(
+    void *context, MlirBytecodeDialectHandle, MlirBytecodeBytesRef version);
+
+/// Invoked per opname with registration flag (version 5+).
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeDialectOpWithRegisteredCallBack(
+    void *context, MlirBytecodeOpHandle, MlirBytecodeDialectHandle,
+    MlirBytecodeStringHandle, bool isRegistered);
 
 /// Invoked when starting parsing of group of resources.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceDialectGroupEnter(
@@ -458,31 +499,73 @@ enum {
   // section.
   mbci_kResourceOffset = 6,
 
+  // This section contains the versions of each dialect (version 1+).
+  mbci_kDialectVersions = 7,
+
+  // This section contains the properties for operations (version 5+).
+  mbci_kProperties = 8,
+
   // The total number of section types.
-  mbci_kNumSections = 7,
+  mbci_kNumSections = 9,
+};
+
+// Bytecode version constants.
+enum {
+  // The minimum supported version of the bytecode.
+  mbci_kMinSupportedVersion = 0,
+
+  // Dialects versioning was added in version 1.
+  mbci_kDialectVersioning = 1,
+
+  // Support for lazy-loading of isolated region was added in version 2.
+  mbci_kLazyLoading = 2,
+
+  // Use-list ordering started to be encoded in version 3.
+  mbci_kUseListOrdering = 3,
+
+  // Avoid recording unknown locations on block arguments (compression) started
+  // in version 4.
+  mbci_kElideUnknownBlockArgLocation = 4,
+
+  // Support for encoding properties natively in bytecode instead of merged
+  // with the discardable attributes.
+  mbci_kNativePropertiesEncoding = 5,
+
+  // ODS emits operand/result segment_size as native properties instead of
+  // an attribute.
+  mbci_kNativePropertiesODSSegmentSize = 6,
+
+  // The current bytecode version.
+  mbci_kVersion = 6,
 };
 
 #ifdef MLIRBC_VERBOSE_ERROR
 static const char *mbci_sectionIDToString(uint8_t id) {
   const char *arr[] = {
-      "String (0)",         //
-      "Dialect (1)",        //
-      "AttrType (2)",       //
-      "AttrTypeOffset (3)", //
-      "IR (4)",             //
-      "Resource (5)",       //
-      "ResourceOffset (6)"  //
+      "String (0)",           //
+      "Dialect (1)",          //
+      "AttrType (2)",         //
+      "AttrTypeOffset (3)",   //
+      "IR (4)",               //
+      "Resource (5)",         //
+      "ResourceOffset (6)",   //
+      "DialectVersions (7)",  //
+      "Properties (8)"        //
   };
   assert(id < sizeof(arr) / sizeof(arr[0]));
   return arr[id];
 }
 #endif
 
-static bool mbci_isSectionOptional(int id) {
+static bool mbci_isSectionOptional(int id, uint64_t version) {
   switch (id) {
   case mbci_kResource:
   case mbci_kResourceOffset:
+  case mbci_kDialectVersions:
     return true;
+  case mbci_kProperties:
+    // Properties are required starting from version 5.
+    return version < mbci_kNativePropertiesEncoding;
   case mbci_kString:
   case mbci_kDialect:
   case mbci_kAttrType:
@@ -538,7 +621,7 @@ static bool mlirBytecodeStreamEmpty(MlirBytecodeStream *stream) {
 static MlirBytecodeStatus
 mlirBytecodeParseByte(void *context, MlirBytecodeStream *stream, uint8_t *val) {
   if (MLIRBC_UNLIKELY(mlirBytecodeStreamEmpty(stream)))
-    return mlirBytecodeFailure();
+    return mlirBytecodeEmitError(context, "attempting to parse a byte at the end of the bytecode");
   *val = *stream->pos++;
   return mlirBytecodeSuccess();
 }
@@ -550,7 +633,7 @@ static MlirBytecodeStatus mlirBytecodeParseBytes(void *context,
   *result = stream->pos;
   stream->pos += n;
   if (MLIRBC_UNLIKELY(stream->pos > stream->end))
-    return mlirBytecodeFailure();
+    return mlirBytecodeEmitError(context, "attempting to parse a byte at the end of the bytecode");
   return mlirBytecodeSuccess();
 }
 
@@ -839,51 +922,124 @@ mlirBytecodeParseDialectSection(void *context,
 
   MlirBytecodeDialectHandle dialect;
   for (dialect.id = 0; dialect.id < numDialects; ++dialect.id) {
-    MlirBytecodeStringHandle dialectStr;
-    ret = mlirBytecodeParseVarInt(context, &stream, &dialectStr.id);
+    // Before version kDialectVersioning, there wasn't any versioning available
+    // for dialects, and the entry represents the string itself.
+    if (parserState->version < mbci_kDialectVersioning) {
+      MlirBytecodeStringHandle dialectStr;
+      ret = mlirBytecodeParseVarInt(context, &stream, &dialectStr.id);
+      if (mlirBytecodeFailed(ret))
+        return mlirBytecodeEmitError(context, "unable to parse dialect %" PRIu64, dialect.id);
+      if (mlirBytecodeFailed(mlirBytecodeDialectCallBack(context, dialect, dialectStr)))
+        return mlirBytecodeFailure();
+      continue;
+    }
+
+    // Parse ID representing dialect and version flag.
+    uint64_t dialectNameIdxWithFlag;
+    ret = mlirBytecodeParseVarInt(context, &stream, &dialectNameIdxWithFlag);
     if (mlirBytecodeFailed(ret))
       return mlirBytecodeEmitError(context, "unable to parse dialect %" PRIu64, dialect.id);
-    if (mlirBytecodeFailed(mlirBytecodeDialectCallBack(
-            context, dialect, dialectStr)))
+    
+    MlirBytecodeStringHandle dialectStr;
+    dialectStr.id = dialectNameIdxWithFlag >> 1;
+    bool versionAvailable = dialectNameIdxWithFlag & 1;
+    
+    if (mlirBytecodeFailed(mlirBytecodeDialectCallBack(context, dialect, dialectStr)))
       return mlirBytecodeFailure();
+
+    // If a version is available, parse and skip the embedded version section.
+    if (versionAvailable) {
+      // Parse the section header (id + length).
+      uint8_t sectionId;
+      ret = mlirBytecodeParseByte(context, &stream, &sectionId);
+      if (mlirBytecodeFailed(ret))
+        return mlirBytecodeEmitError(context, "unable to parse dialect version section id");
+      if (sectionId != mbci_kDialectVersions)
+        return mlirBytecodeEmitError(context, "expected dialect version section, got %d", sectionId);
+      
+      uint64_t versionLength;
+      ret = mlirBytecodeParseVarInt(context, &stream, &versionLength);
+      if (mlirBytecodeFailed(ret))
+        return mlirBytecodeEmitError(context, "unable to parse dialect version length");
+      
+      // Extract the version bytes as a reference.
+      const uint8_t *versionData;
+      ret = mlirBytecodeParseBytes(context, &stream, versionLength, &versionData);
+      if (mlirBytecodeFailed(ret))
+        return mlirBytecodeEmitError(context, "unable to parse dialect version data");
+      
+      MlirBytecodeBytesRef versionRef = {.data = versionData, .length = versionLength};
+      // Call the version callback (can be a no-op in Printer example).
+      ret = mlirBytecodeDialectVersionCallBack(context, dialect, versionRef);
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+        return ret;
+    }
   }
 
-  const uint8_t *resetPos = stream.pos;
-  // TODO: See if possible to avoid reparsing.
-  MlirBytecodeSize numOps = 0;
-  while (!mlirBytecodeStreamEmpty(&stream)) {
-    uint64_t dialect, numOpNames;
-    mlirBytecodeParseVarInt(context, &stream, &dialect);
-    mlirBytecodeParseVarInt(context, &stream, &numOpNames);
-    ret = mbci_skipVarInts(context, &stream, numOpNames);
+  // For version 4+, the total number of ops is pre-parsed.
+  MlirBytecodeSize totalOps = 0;
+  if (parserState->version >= mbci_kElideUnknownBlockArgLocation) {
+    uint64_t numOps;
+    ret = mlirBytecodeParseVarInt(context, &stream, &numOps);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+      return mlirBytecodeEmitError(context, "unable to parse total op count");
+    totalOps = numOps;
+    ret = mlirBytecodeDialectOpNames(context, totalOps);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
-    numOps += numOpNames;
+  } else {
+    // Pre-v4: Need to re-parse to count ops first.
+    const uint8_t *resetPos = stream.pos;
+    while (!mlirBytecodeStreamEmpty(&stream)) {
+      uint64_t dialectId, numOpNames;
+      mlirBytecodeParseVarInt(context, &stream, &dialectId);
+      mlirBytecodeParseVarInt(context, &stream, &numOpNames);
+      ret = mbci_skipVarInts(context, &stream, numOpNames);
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+        return ret;
+      totalOps += numOpNames;
+    }
+    ret = mlirBytecodeDialectOpNames(context, totalOps);
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+      return ret;
+    stream.pos = resetPos;
   }
-  ret = mlirBytecodeDialectOpNames(context, numOps);
-  if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-    return ret;
-  stream.pos = resetPos;
 
+  // Parse operation names grouped by dialect.
   MlirBytecodeOpHandle op;
   op.id = 0;
   while (!mlirBytecodeStreamEmpty(&stream)) {
-	  MlirBytecodeDialectHandle dialect;
+    MlirBytecodeDialectHandle opDialect;
     uint64_t numOpNames;
-    mlirBytecodeParseVarInt(context, &stream, &dialect.id);
+    mlirBytecodeParseVarInt(context, &stream, &opDialect.id);
     mlirBytecodeParseVarInt(context, &stream, &numOpNames);
 
-    mlirBytecodeEmitDebug("parsing for dialect %d %d ops", dialect, numOpNames);
+    mlirBytecodeEmitDebug("parsing for dialect %d %d ops", opDialect, numOpNames);
     for (uint64_t j = 0; j < numOpNames; ++j) {
-MlirBytecodeStringHandle
-       opName;
-      ret = mlirBytecodeParseVarInt(context, &stream, &opName.id);
-      assert(mlirBytecodeSucceeded(ret) &&
-             "impossible; would have failed above");
-      ret = mlirBytecodeDialectOpCallBack(
-          context, op, dialect, opName);
-      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-        return ret;
+      // For version 5+, op names include registration flag.
+      if (parserState->version >= mbci_kNativePropertiesEncoding) {
+        uint64_t opNameIdxWithFlag;
+        ret = mlirBytecodeParseVarInt(context, &stream, &opNameIdxWithFlag);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+          return mlirBytecodeEmitError(context, "unable to parse op name");
+        
+        MlirBytecodeStringHandle opName;
+        opName.id = opNameIdxWithFlag >> 1;
+        bool isRegistered = opNameIdxWithFlag & 1;
+        
+        ret = mlirBytecodeDialectOpWithRegisteredCallBack(
+            context, op, opDialect, opName, isRegistered);
+        if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+          return ret;
+      } else {
+        MlirBytecodeStringHandle opName;
+        ret = mlirBytecodeParseVarInt(context, &stream, &opName.id);
+        assert(mlirBytecodeSucceeded(ret) &&
+               "impossible; would have failed above");
+        ret = mlirBytecodeDialectOpCallBack(context, op, opDialect, opName);
+        if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+          return ret;
+      }
       ++op.id;
     }
   }
@@ -1045,12 +1201,13 @@ mlirBytecodeParseResourceSection(void *context,
   // element which is the 0 number of external resource elements.
   bool emptyOffsetSection = offsetSection.length <= 1;
   assert(!emptyOffsetSection || (offsetSection.length == 0 || (offsetSection.length == 1 && offsetSection.data[0] == 1)));
-  if (emptyOffsetSection != (resSection.length == 0)) {
-    if (emptyOffsetSection)
-      return mlirBytecodeEmitError(context, "unexpected resource section when "
+  
+  // If offset section is empty but resource section is not, that's an error.
+  // If offset section is present but resource section is empty, that's OK
+  // (resources were elided with -elide-resource-data-from-bytecode).
+  if (emptyOffsetSection && resSection.length != 0) {
+    return mlirBytecodeEmitError(context, "unexpected resource section when "
 	                                      "resource offset section is not present");
-    return mlirBytecodeEmitError(context, "unexpected resource offset section when "
-	                                      "resource section is not present");
   }
   if (offsetSection.length == 0)
     return mlirBytecodeSuccess();
@@ -1189,6 +1346,9 @@ struct mbci_MlirIRSectionStackEntry {
   // Number of regions to still complete parsing.
   // Number of regions is assumed to be relatively small (<= 32767).
   uint16_t numRegionsRemaining : 15;
+  
+  // Whether this region is isolated from above (v2+ uses separate IR section).
+  uint16_t isIsolatedFromAbove : 1;
 
   // Number of blocks to still complete parsing.
   // Number of regions is assumed to be relatively small (<= 65536).
@@ -1196,6 +1356,21 @@ struct mbci_MlirIRSectionStackEntry {
 
   // Number of ops remaining.
   uint32_t numOpsRemaining;
+  
+  // For v2+ isolated regions: stream pointing to the isolated region's IR section.
+  // When null, uses the parent stream.
+  MlirBytecodeStream *isolatedStream;
+  
+  // Pending use-list orders for operation results (stored during parsing,
+  // applied after op creation). Max 16 results with use-list orders per op,
+  // each with max 64 indices.
+  uint8_t numPendingUseListOrders;
+  struct {
+    uint8_t resultIdx;
+    uint8_t indexPairEncoding;
+    uint8_t numIndices;
+    uint16_t indices[16];  // Max 16 indices stored inline
+  } pendingUseListOrders[4];  // Max 4 results with use-lists
 };
 typedef struct mbci_MlirIRSectionStackEntry mbci_MlirIRSectionStackEntry;
 
@@ -1229,6 +1404,8 @@ mbci_mlirIRSectionStackPush(void *context, mbci_MlirIRSectionStack *stack) {
   mbci_MlirIRSectionStackEntry *it = mbci_getStackTop(stack);
   it->numBlocksRemaining = mbci_MlirIRSectionStackUnset;
   it->numOpsRemaining = mbci_MlirIRSectionStackUnset;
+  it->isolatedStream = NULL;
+  // Note: isIsolatedFromAbove is already set on this entry from mbci_parseOperation.
 
   return mlirBytecodeSuccess();
 }
@@ -1269,26 +1446,144 @@ static MlirBytecodeStatus mbci_parseBlock(void *context,
 
   for (MlirBytecodeSize i = 0; i < numArgs; ++i) {
     MlirBytecodeTypeHandle type;
-    ret = mlirBytecodeParseHandle(context, stream, &type);
-    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-      return ret;
     MlirBytecodeLocHandle loc;
-    ret = mlirBytecodeParseHandle(context, stream, &loc);
-    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
-      return ret;
+    
+    // Version 4+ uses (type << 1) | hasLocation encoding for compression.
+    if (parserState->version >= mbci_kElideUnknownBlockArgLocation) {
+      uint64_t typeIdxWithFlag;
+      ret = mlirBytecodeParseVarInt(context, stream, &typeIdxWithFlag);
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+        return ret;
+      
+      type.id = typeIdxWithFlag >> 1;
+      bool hasLoc = typeIdxWithFlag & 1;
+      
+      if (hasLoc) {
+        ret = mlirBytecodeParseHandle(context, stream, &loc);
+        if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+          return ret;
+      } else {
+        // Unknown location - use sentinel value (0xFFFFFFFFFFFFFFFF).
+        loc.id = UINT64_MAX;
+      }
+    } else {
+      // Pre-v4: type and location are separate varints.
+      ret = mlirBytecodeParseHandle(context, stream, &type);
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+        return ret;
+      ret = mlirBytecodeParseHandle(context, stream, &loc);
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+        return ret;
+    }
 
     ret = mlirBytecodeOperationBlockAddArgument(context, top->op, type, loc);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
+
+  // Parse use-list orders for block arguments (v3+).
+  if (hasArgs && parserState->version >= mbci_kUseListOrdering) {
+    uint8_t hasUseListOrders = 0;
+    ret = mlirBytecodeParseByte(context, stream, &hasUseListOrders);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+      return ret;
+    
+    if (hasUseListOrders) {
+      uint64_t numValuesToRead = 1;
+      if (numArgs > 1) {
+        ret = mlirBytecodeParseVarInt(context, stream, &numValuesToRead);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+          return mlirBytecodeEmitError(context, "invalid block arg use-list count");
+      }
+      
+      for (uint64_t v = 0; v < numValuesToRead; ++v) {
+        uint64_t argIdx = 0;
+        if (numArgs > 1) {
+          ret = mlirBytecodeParseVarInt(context, stream, &argIdx);
+          if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+            return mlirBytecodeEmitError(context, "invalid block arg use-list index");
+        }
+        
+        uint64_t numIndicesWithFlag;
+        ret = mlirBytecodeParseVarInt(context, stream, &numIndicesWithFlag);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+          return mlirBytecodeEmitError(context, "invalid block arg use-list encoding");
+        
+        bool indexPairEncoding = numIndicesWithFlag & 1;
+        uint64_t numIndices = numIndicesWithFlag >> 1;
+        
+        // Parse all indices into a buffer.
+        uint64_t indicesBuf[64];  // Stack buffer for small cases
+        uint64_t *indices = indicesBuf;
+        if (numIndices > 64) {
+          // TODO: This should be optional rather than required to use malloc or
+          // any allocator.
+          indices = (uint64_t *)malloc(numIndices * sizeof(uint64_t));
+          if (!indices)
+            return mlirBytecodeEmitError(context, "failed to allocate use-list indices");
+        }
+        
+        for (uint64_t i = 0; i < numIndices; ++i) {
+          ret = mlirBytecodeParseVarInt(context, stream, &indices[i]);
+          if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
+            // TODO: Optional allocation.
+            if (indices != indicesBuf) free(indices);
+            return mlirBytecodeEmitError(context, "invalid block arg use-list index value");
+          }
+        }
+        
+        // Call the callback to store the use-list order.
+        ret = mlirBytecodeBlockArgAddUseListOrder(context, argIdx, indexPairEncoding,
+                                                   indices, numIndices);
+        if (indices != indicesBuf) free(indices);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+          return ret;
+      }
+    }
+  }
   return ret;
 }
 
 static MlirBytecodeStatus mbci_parseRegion(void *context,
+                                           MlirBytecodeParserState *parserState,
                                            MlirBytecodeStream *stream,
                                            mbci_MlirIRSectionStack *stack,
                                            void *state) {
   mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(stack);
+  
+  // For v2+ with isolated regions, parse the inline IR section first.
+  // The isIsolatedFromAbove flag is set on the current stack top (the operation with regions).
+  if (parserState->version >= mbci_kLazyLoading && top->isIsolatedFromAbove) {
+    // Parse inline section header: section ID + length + data
+    uint8_t sectionId;
+    MlirBytecodeStatus ret = mlirBytecodeParseByte(context, stream, &sectionId);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+      return mlirBytecodeEmitError(context, "unable to parse inline IR section id");
+    if (sectionId != mbci_kIR)
+      return mlirBytecodeEmitError(context, "expected IR section for isolated region, got %d", sectionId);
+    
+    uint64_t sectionLength;
+    ret = mlirBytecodeParseVarInt(context, stream, &sectionLength);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+      return mlirBytecodeEmitError(context, "unable to parse inline IR section length");
+    
+    // Create a new stream for the isolated region's IR content.
+    const uint8_t *sectionData;
+    ret = mlirBytecodeParseBytes(context, stream, sectionLength, &sectionData);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+      return mlirBytecodeEmitError(context, "unable to parse inline IR section data");
+    
+    // Store the isolated region's stream in the stack entry.
+    // We allocate a static inline stream for simplicity.
+    static MlirBytecodeStream isolatedStreamStorage[MLIRBC_IR_STACK_MAX_DEPTH];
+    isolatedStreamStorage[stack->top].pos = sectionData;
+    isolatedStreamStorage[stack->top].end = sectionData + sectionLength;
+    top->isolatedStream = &isolatedStreamStorage[stack->top];
+    
+    // Now parse region content from the isolated stream.
+    stream = top->isolatedStream;
+  }
+  
   uint64_t numBlocksRemaining;
   MlirBytecodeStatus ret =
       mlirBytecodeParseVarInt(context, stream, &numBlocksRemaining);
@@ -1321,6 +1616,8 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
     kHasOperands = 0x04,
     kHasSuccessors = 0x08,
     kHasInlineRegions = 0x10,
+    kHasUseListOrders = 0x20,  // v3+
+    kHasProperties = 0x40,     // v5+
   };
 
   MlirBytecodeOpHandle name;
@@ -1339,6 +1636,9 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
     return mlirBytecodeEmitError(context, "invalid operation location");
 
   mbci_MlirIRSectionStackEntry *cur = mbci_getStackWIP(stack);
+  // Initialize isIsolatedFromAbove and pending use-lists to clear stale values.
+  cur->isIsolatedFromAbove = 0;
+  cur->numPendingUseListOrders = 0;
   ret = mlirBytecodeOperationStatePush(context, name, loc, &cur->opState);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
@@ -1357,9 +1657,22 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
       return mlirBytecodeEmitDebug("unable to add attributes"), ret;
   }
 
-  // Parsing all the variadic sizes.
+  // Parse properties for v5+.
+  if (parserState->version >= mbci_kNativePropertiesEncoding &&
+      (encodingMask & kHasProperties)) {
+    uint64_t propertiesIdx;
+    ret = mlirBytecodeParseVarInt(context, stream, &propertiesIdx);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+      return mlirBytecodeEmitError(context, "invalid properties index");
+    ret = mlirBytecodeOperationStateAddProperties(context, cur->opState,
+                                                  (MlirBytecodeHandle){propertiesIdx});
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+      return ret;
+  }
+
+  // Parsing all the variadic sizes. numResults is used for use-list parsing.
+  uint64_t numResults = 0;
   if (encodingMask & kHasResults) {
-    uint64_t numResults = 0;
     ret = mlirBytecodeParseVarInt(context, stream, &numResults);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return mlirBytecodeEmitError(context, "invalid result types"), ret;
@@ -1424,6 +1737,58 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
     }
   }
 
+  // Parse use-list orders for v3+ if present.
+  // Store data in pending buffer, then call callback after op creation.
+  if (parserState->version >= mbci_kUseListOrdering &&
+      (encodingMask & kHasUseListOrders)) {
+    uint64_t numValuesToRead = 1;
+    if (numResults > 1) {
+      ret = mlirBytecodeParseVarInt(context, stream, &numValuesToRead);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+        return mlirBytecodeEmitError(context, "invalid use-list count");
+    }
+    
+    for (uint64_t v = 0; v < numValuesToRead; ++v) {
+      uint64_t resultIdx = 0;
+      if (numResults > 1) {
+        ret = mlirBytecodeParseVarInt(context, stream, &resultIdx);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+          return mlirBytecodeEmitError(context, "invalid use-list result index");
+      }
+      
+      uint64_t numIndicesWithFlag;
+      ret = mlirBytecodeParseVarInt(context, stream, &numIndicesWithFlag);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+        return mlirBytecodeEmitError(context, "invalid use-list encoding");
+      
+      bool indexPairEncoding = numIndicesWithFlag & 1;
+      uint64_t numIndices = numIndicesWithFlag >> 1;
+      
+      // Store in pending buffer if there's space.
+      if (cur->numPendingUseListOrders < 4 && numIndices <= 16) {
+        uint8_t idx = cur->numPendingUseListOrders++;
+        cur->pendingUseListOrders[idx].resultIdx = (uint8_t)resultIdx;
+        cur->pendingUseListOrders[idx].indexPairEncoding = indexPairEncoding ? 1 : 0;
+        cur->pendingUseListOrders[idx].numIndices = (uint8_t)numIndices;
+        for (uint64_t i = 0; i < numIndices; ++i) {
+          uint64_t index;
+          ret = mlirBytecodeParseVarInt(context, stream, &index);
+          if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+            return mlirBytecodeEmitError(context, "invalid use-list index");
+          cur->pendingUseListOrders[idx].indices[i] = (uint16_t)index;
+        }
+      } else {
+        // Skip indices we can't store (too many results or too many indices).
+        for (uint64_t i = 0; i < numIndices; ++i) {
+          uint64_t index;
+          ret = mlirBytecodeParseVarInt(context, stream, &index);
+          if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+            return mlirBytecodeEmitError(context, "invalid use-list index");
+        }
+      }
+    }
+  }
+
   if (encodingMask & kHasInlineRegions) {
     uint64_t numRegions = 0;
     bool isIsolatedFromAbove = false;
@@ -1433,6 +1798,7 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
       return mlirBytecodeEmitError(context, "invalid number of regions");
     }
     cur->numRegionsRemaining = numRegions;
+    cur->isIsolatedFromAbove = isIsolatedFromAbove;
     ret = mlirBytecodeOperationStateAddRegions(context, cur->opState,
                                                numRegions, isIsolatedFromAbove);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
@@ -1446,8 +1812,48 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
     return ret;
   cur->op = opHandle;
 
-  if (encodingMask & kHasInlineRegions)
+  // Apply pending use-list orders now that the operation exists.
+  for (uint8_t i = 0; i < cur->numPendingUseListOrders; ++i) {
+    uint64_t indices64[16];
+    for (uint8_t j = 0; j < cur->pendingUseListOrders[i].numIndices; ++j)
+      indices64[j] = cur->pendingUseListOrders[i].indices[j];
+    ret = mlirBytecodeResultAddUseListOrder(
+        context, opHandle, cur->pendingUseListOrders[i].resultIdx,
+        cur->pendingUseListOrders[i].indexPairEncoding != 0,
+        indices64, cur->pendingUseListOrders[i].numIndices);
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+      return ret;
+  }
+
+  if (encodingMask & kHasInlineRegions) {
+    // If the operation was lazily loaded, skip region processing.
+    // The regions will be parsed later when materialized.
+    if (mlirBytecodeOperationWasLazyLoaded(context, opHandle)) {
+      // Skip the inline IR section data for isolated regions (v2+).
+      if (parserState->version >= mbci_kLazyLoading && cur->isIsolatedFromAbove) {
+        // Parse and skip the section header.
+        uint8_t sectionId;
+        ret = mlirBytecodeParseByte(context, stream, &sectionId);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+          return ret;
+        uint64_t sectionLength;
+        ret = mlirBytecodeParseVarInt(context, stream, &sectionLength);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+          return ret;
+        // Skip the section data.
+        const uint8_t *sectionData;
+        ret = mlirBytecodeParseBytes(context, stream, sectionLength, &sectionData);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+          return ret;
+        // Store the deferred region data for later materialization.
+        mlirBytecodeStoreDeferredRegionData(context, opHandle, sectionData, sectionLength);
+      }
+      // Decrement op count since we won't push to region stack.
+      --mbci_getStackTop(stack)->numOpsRemaining;
+      return ret;
+    }
     return mbci_mlirIRSectionStackPush(context, stack);
+  }
 
   // `cur` is the scratchpad for parsing op without region while `top` is where
   // it is being parsed.
@@ -1478,9 +1884,19 @@ mlirBytecodeParseIRSection(void *context, MlirBytecodeParserState *parserState,
   stack.data[0].numRegionsRemaining = 1;
   stack.data[0].numBlocksRemaining = 1;
   stack.data[0].numOpsRemaining = numOps;
+  stack.data[0].isIsolatedFromAbove = 0;
+  stack.data[0].isolatedStream = NULL;
 
   while (stack.data[0].numOpsRemaining) {
     mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(&stack);
+    // Find the active stream by walking up the stack to find the closest isolated stream.
+    MlirBytecodeStream *activeStream = &stream;
+    for (int i = stack.top; i >= 0; --i) {
+      if (stack.data[i].isolatedStream) {
+        activeStream = stack.data[i].isolatedStream;
+        break;
+      }
+    }
 
     MlirBytecodeStatus ret;
     bool next = false;
@@ -1515,14 +1931,14 @@ mlirBytecodeParseIRSection(void *context, MlirBytecodeParserState *parserState,
 
     if (top->numBlocksRemaining == (uint16_t)mbci_MlirIRSectionStackUnset) {
       mlirBytecodeEmitDebug("starting region parsing");
-      ret = mbci_parseRegion(context, &stream, &stack, context);
+      ret = mbci_parseRegion(context, parserState, activeStream, &stack, context);
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
       continue;
     }
     if (top->numOpsRemaining == (uint32_t)mbci_MlirIRSectionStackUnset) {
       mlirBytecodeEmitDebug("starting block parsing");
-      ret = mbci_parseBlock(context, parserState, &stream, &stack);
+      ret = mbci_parseBlock(context, parserState, activeStream, &stack);
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
         return ret;
       continue;
@@ -1532,7 +1948,7 @@ mlirBytecodeParseIRSection(void *context, MlirBytecodeParserState *parserState,
                           mbci_getStackTop(&stack)->numRegionsRemaining,
                           mbci_getStackTop(&stack)->numBlocksRemaining,
                           mbci_getStackTop(&stack)->numOpsRemaining);
-    ret = mbci_parseOperation(context, parserState, &stream, &stack);
+    ret = mbci_parseOperation(context, parserState, activeStream, &stack);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
@@ -1563,9 +1979,9 @@ mlirBytecodePopulateParserState(void *context,
   if (mlirBytecodeFailed(
           mlirBytecodeParseVarInt(context, &stream, &ret.version)))
     return mlirBytecodeEmitError(context, "invalid version"), ret;
-  // FIXME
-  if (ret.version > 0)
-    return mlirBytecodeEmitError(context, "bytecode version %d is newer than the current version %d", ret.version, 0), ret;
+  // Validate the bytecode version.
+  if (ret.version > mbci_kVersion)
+    return mlirBytecodeEmitError(context, "bytecode version %" PRIu64 " is newer than the current version %d", ret.version, mbci_kVersion), ret;
   if (mlirBytecodeFailed(
           mlirBytecodeParseNullTerminatedString(context, &stream, &producer)))
     return mlirBytecodeEmitError(context, "invalid producer"), ret;
@@ -1577,11 +1993,11 @@ mlirBytecodePopulateParserState(void *context,
       return mlirBytecodeEmitError(context, "invalid section"), ret;
   }
 
-  // Check that all of the required sections were found
+  // Check that all of the required sections were found.
   for (int i = 0; i < mbci_kNumSections; ++i) {
-    if (mbci_getSection(&ret, i).data == NULL && !mbci_isSectionOptional(i)) {
+    if (mbci_getSection(&ret, i).data == NULL && !mbci_isSectionOptional(i, ret.version)) {
       return mlirBytecodeEmitError(context,
-                                   "missing data for top-level section: ",
+                                   "missing data for top-level section: %s",
                                    mbci_sectionIDToString(i)),
              ret;
     }
@@ -1619,4 +2035,126 @@ MlirBytecodeStatus mlirBytecodeParse(void *context,
 
   // Finally, process the IR section.
   return mlirBytecodeParseIRSection(context, parserState, retBlock);
+}
+
+/// Parse a deferred region from stored bytecode data.
+/// This is used for lazy loading materialization.
+MlirBytecodeStatus mlirBytecodeParseDeferredRegion(
+    void *context, MlirBytecodeParserState *parserState,
+    const uint8_t *regionData, uint64_t regionDataLength,
+    MlirBytecodeOperationHandle opHandle) {
+  if (regionData == NULL || regionDataLength == 0)
+    return mlirBytecodeSuccess();  // Empty region data - nothing to parse
+  
+  // Create stream from region data
+  MlirBytecodeBytesRef ref = {regionData, regionDataLength};
+  MlirBytecodeStream stream = mlirBytecodeStreamCreate(ref);
+  
+  // Region format: numBlocks (varint), numValues (varint), then blocks...
+  uint64_t numBlocks;
+  MlirBytecodeStatus ret = mlirBytecodeParseVarInt(context, &stream, &numBlocks);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+    return mlirBytecodeEmitError(context, "unable to parse number of blocks in deferred region");
+  
+  if (numBlocks == 0)
+    return mlirBytecodeSuccess();  // Empty region
+  
+  uint64_t numValues;
+  ret = mlirBytecodeParseVarInt(context, &stream, &numValues);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+    return mlirBytecodeEmitError(context, "unable to parse number of values in deferred region");
+  
+  // Set up the parsing state - push region first
+  ret = mlirBytecodeOperationRegionPush(context, opHandle, numBlocks, numValues);
+  if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+    return ret;
+  
+  // Get the actual number of regions from the operation
+  uint64_t numRegions = mlirBytecodeGetOperationNumRegions(opHandle);
+  
+  // Initialize parsing stack
+  mbci_MlirIRSectionStack stack;
+  stack.top = 0;
+  stack.data[0].op = opHandle;
+  stack.data[0].numRegionsRemaining = numRegions;
+  stack.data[0].numBlocksRemaining = numBlocks;
+  stack.data[0].numOpsRemaining = mbci_MlirIRSectionStackUnset;
+  stack.data[0].isIsolatedFromAbove = 1;
+  stack.data[0].isolatedStream = &stream;
+  stack.data[0].numPendingUseListOrders = 0;
+  
+  // Parse using the standard IR parsing loop
+  while (stack.data[0].numRegionsRemaining > 0 || stack.data[0].numBlocksRemaining > 0 || stack.data[0].numOpsRemaining > 0) {
+    mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(&stack);
+    MlirBytecodeStream *activeStream = &stream;
+    for (int i = stack.top; i >= 0; --i) {
+      if (stack.data[i].isolatedStream) {
+        activeStream = stack.data[i].isolatedStream;
+        break;
+      }
+    }
+    
+    bool next = false;
+    if (top->numOpsRemaining == 0) {
+      ret = mlirBytecodeOperationBlockPop(context, top->op);
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+        return ret;
+      --top->numBlocksRemaining;
+      top->numOpsRemaining = mbci_MlirIRSectionStackUnset;
+      next = true;
+    }
+    if (top->numBlocksRemaining == 0) {
+      ret = mlirBytecodeOperationRegionPop(context, top->op);
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+        return ret;
+      --top->numRegionsRemaining;
+      top->numBlocksRemaining = mbci_MlirIRSectionStackUnset;
+      next = true;
+    }
+    if (top->numRegionsRemaining == 0) {
+      mbci_mlirIRSectionStackPop(context, &stack);
+      if (stack.top < 0)
+        break;  // Done parsing
+      --mbci_getStackTop(&stack)->numOpsRemaining;
+      next = true;
+    }
+    if (next)
+      continue;
+    
+    if (top->numBlocksRemaining == (uint16_t)mbci_MlirIRSectionStackUnset) {
+      // Parse region content directly without inline IR section handling
+      // (the inline section was already consumed when we stored the irData)
+      uint64_t numBlocksRegion;
+      ret = mlirBytecodeParseVarInt(context, activeStream, &numBlocksRegion);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+        return mlirBytecodeEmitError(context, "unable to parse numBlocks in deferred region");
+      
+      top->numBlocksRemaining = numBlocksRegion;
+      top->numOpsRemaining = mbci_MlirIRSectionStackUnset;
+      
+      if (numBlocksRegion == 0)
+        continue;
+      
+      uint64_t numValuesRegion;
+      ret = mlirBytecodeParseVarInt(context, activeStream, &numValuesRegion);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+        return mlirBytecodeEmitError(context, "unable to parse numValues in deferred region");
+      
+      ret = mlirBytecodeOperationRegionPush(context, top->op, numBlocksRegion, numValuesRegion);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+        return ret;
+      continue;
+    }
+    if (top->numOpsRemaining == (uint32_t)mbci_MlirIRSectionStackUnset) {
+      ret = mbci_parseBlock(context, parserState, activeStream, &stack);
+      if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+        return ret;
+      continue;
+    }
+    ret = mbci_parseOperation(context, parserState, activeStream, &stack);
+    if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
+      return ret;
+  }
+  
+  return mlirBytecodeSuccess();
 }

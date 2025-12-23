@@ -4,6 +4,20 @@ This documents describes the MLIR bytecode format and its encoding.
 
 [TOC]
 
+## Version History
+
+The MLIR bytecode format has evolved across versions. mlirbcc supports versions 0-6:
+
+| Version | Feature | Description |
+|---------|---------|-------------|
+| 0 | Initial | Base format |
+| 1 | Dialect Versioning | Dialects can have version info for upgrade paths |
+| 2 | Lazy Loading | Isolated regions encoded as inline IR sections |
+| 3 | Use-List Ordering | Preserves use-list order in bytecode |
+| 4 | Block Arg Location Elision | Compresses unknown block arg locations |
+| 5 | Native Properties Encoding | Operations can have native properties |
+| 6 | Properties ODS Support | Full properties support with ODS integration |
+
 ## Magic Number
 
 MLIR uses the following four-byte magic number to indicate bytecode files:
@@ -152,21 +166,40 @@ dialects that were also referenced.
 ```
 dialect_section {
   numDialects: varint,
-  dialectNames: varint[],
+  dialectNames: dialect_name[],
   opNames: op_name_group[]
+}
+
+// Version 0
+dialect_name_v0 {
+  stringIndex: varint
+}
+
+// Version 1+ (dialect versioning)
+dialect_name_v1 {
+  nameWithFlag: varint  // (stringIndex << 1) | hasVersion
 }
 
 op_name_group {
   dialect: varint,
   numOpNames: varint,
-  opNames: varint[]
+  opNames: op_name[]    // varint[] for v0-v4, op_name_v5[] for v5+
+}
+
+// Version 5+ (operation registration flag)
+op_name_v5 {
+  nameWithFlag: varint  // (stringIndex << 1) | isRegistered
 }
 ```
 
 Dialects are encoded as indexes to the name string within the string section.
+For **version 1+**, the dialect name index includes a flag indicating if version
+data is present in the dialect versions section.
+
 Operation names are encoded in groups by dialect, with each group containing the
 dialect, the number of operation names, and the array of indexes to each name
-within the string section.
+within the string section. For **version 5+**, each op name index includes a flag
+indicating if the operation was registered when the bytecode was written.
 
 ### Attribute/Type Sections
 
@@ -313,6 +346,7 @@ op {
   location: varint,
 
   attrDict: varint?,
+  properties: varint?,          // v5+ if kHasProperties
 
   numResults: varint?,
   resultTypes: varint[],
@@ -323,8 +357,10 @@ op {
   numSuccessors: varint?,
   successors: varint[],
 
+  useListOrders: use_list_order[]?,  // v3+ if kHasUseListOrders
+
   regionEncoding: varint?, // (numRegions << 1) | (isIsolatedFromAbove)
-  regions: region[]
+  regions: region[]        // v2+ isolated regions are inline IR sections
 }
 ```
 
@@ -333,6 +369,17 @@ commonly appearing structure in the bytecode. A single encoding is used for
 every type of operation. Given this prevelance, many of the fields of an
 operation are optional. The `encodingMask` field is a bitmask which indicates
 which of the components of the operation are present.
+
+**Encoding Mask Flags:**
+| Bit | Flag | Version | Description |
+|-----|------|---------|-------------|
+| 0x01 | kHasAttrs | v0+ | Operation has attribute dictionary |
+| 0x02 | kHasResults | v0+ | Operation has results |
+| 0x04 | kHasOperands | v0+ | Operation has operands |
+| 0x08 | kHasSuccessors | v0+ | Operation has successors |
+| 0x10 | kHasInlineRegions | v0+ | Operation has regions |
+| 0x20 | kHasUseListOrders | v3+ | Operation has use-list orderings |
+| 0x40 | kHasProperties | v5+ | Operation has native properties |
 
 ##### Location
 
@@ -386,6 +433,7 @@ followed by the blocks of the region.
 block {
   encoding: varint, // (numOps << 1) | (hasBlockArgs)
   arguments: block_arguments?, // Optional based on encoding
+  useListOrders: byte?,        // v3+ if hasBlockArgs: 0 or 1
   ops : op[]
 }
 
@@ -394,12 +442,26 @@ block_arguments {
   args: block_argument[]
 }
 
-block_argument {
+// Version 0-3
+block_argument_v0 {
   typeIndex: varint,
   location: varint
+}
+
+// Version 4+ (location elision)
+block_argument_v4 {
+  typeWithFlag: varint,  // (typeIndex << 1) | hasLocation
+  location: varint?      // Only if hasLocation=1, else unknown location
 }
 ```
 
 A block is encoded with an array of operations and block arguments. The first
 field is an encoding that combines the number of operations in the block, with a
 flag indicating if the block has arguments.
+
+For **version 4+**, block argument locations are compressed: the type index
+includes a flag indicating if the location is present. If not present, the
+location defaults to unknown.
+
+For **version 3+**, after block arguments, a byte indicates if use-list orderings
+are present for the block arguments.

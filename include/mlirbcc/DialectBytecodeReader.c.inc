@@ -12,7 +12,7 @@
 #ifndef MLIRBC_DIALECTBYTECODEREADER_H
 #define MLIRBC_DIALECTBYTECODEREADER_H
 
-#include "mlir/Bytecode/BytecodeTypes.h"
+#include "BytecodeTypes.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
