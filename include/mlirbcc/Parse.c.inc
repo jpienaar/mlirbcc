@@ -49,6 +49,10 @@ extern "C" {
 // - Configs
 #define MLIRBC_IR_STACK_MAX_DEPTH 15 // TODO: add dynamic option.
 
+// Use-list order storage limits (inline storage to avoid dynamic allocation).
+#define MLIRBC_MAX_PENDING_USE_LISTS 4
+#define MLIRBC_MAX_USE_LIST_INDICES 16
+
 // - Types needed to be defined before including this file.
 typedef MlirBytecodeOperationState *MlirBytecodeOperationStateHandle;
 typedef MlirBytecodeOperation *MlirBytecodeOperationHandle;
@@ -720,11 +724,25 @@ MlirBytecodeStatus mlirBytecodeParseVarInt(void *context,
   if (mlirBytecodeFailed(mlirBytecodeParseByte(context, stream, &head)))
     return mlirBytecodeFailure();
   *result = head;
+
+  // Fast path: Single byte encoding.
   if (MLIRBC_LIKELY(*result & 1)) {
     *result >>= 1;
     return mlirBytecodeSuccess();
   }
 
+  // Fast path: Two byte encoding.
+  // Encoding: head has pattern 0bxxxxxx10, meaning 1 additional byte.
+  if (MLIRBC_LIKELY(*result & 0x02)) {
+    uint8_t byte1;
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(mlirBytecodeParseByte(context, stream, &byte1))))
+      return mlirBytecodeFailure();
+    // Decode: (head >> 2) gives low 6 bits, byte1 << 6 gives high bits.
+    *result = (head >> 2) | ((uint64_t)byte1 << 6);
+    return mlirBytecodeSuccess();
+  }
+
+  // Slow path: 8-byte or multi-byte encoding.
   if (MLIRBC_UNLIKELY(*result == 0)) {
     uint32_t numBytes = sizeof(*result);
     const uint8_t *res;
@@ -984,7 +1002,11 @@ mlirBytecodeParseDialectSection(void *context,
       if (mlirBytecodeFailed(ret))
         return mlirBytecodeEmitError(context, "unable to parse dialect version data");
       
-      MlirBytecodeBytesRef versionRef = {.data = versionData, .length = versionLength};
+      // Create version reference using explicit assignment for C89 compatibility.
+      MlirBytecodeBytesRef versionRef;
+      versionRef.data = versionData;
+      versionRef.length = versionLength;
+
       // Call the version callback (can be a no-op in Printer example).
       ret = mlirBytecodeDialectVersionCallBack(context, dialect, versionRef);
       if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
@@ -1385,15 +1407,14 @@ struct mbci_MlirIRSectionStackEntry {
   
 #ifndef MLIRBC_NO_USE_LIST_ORDERING
   // Pending use-list orders for operation results (stored during parsing,
-  // applied after op creation). Max 16 results with use-list orders per op,
-  // each with max 64 indices.
+  // applied after op creation).
   uint8_t numPendingUseListOrders;
   struct {
     uint8_t resultIdx;
     uint8_t indexPairEncoding;
     uint8_t numIndices;
-    uint16_t indices[16];  // Max 16 indices stored inline
-  } pendingUseListOrders[4];  // Max 4 results with use-lists
+    uint16_t indices[MLIRBC_MAX_USE_LIST_INDICES];
+  } pendingUseListOrders[MLIRBC_MAX_PENDING_USE_LISTS];
 #endif
 };
 typedef struct mbci_MlirIRSectionStackEntry mbci_MlirIRSectionStackEntry;
@@ -1404,6 +1425,10 @@ struct mbci_MlirIRSectionStack {
   int top;
 
   mbci_MlirIRSectionStackEntry data[MLIRBC_IR_STACK_MAX_DEPTH + 1];
+
+  // Inline storage for isolated region streams (v2+ lazy loading).
+  // Each stack level may have its own isolated stream.
+  MlirBytecodeStream isolatedStreamStorage[MLIRBC_IR_STACK_MAX_DEPTH + 1];
 };
 typedef struct mbci_MlirIRSectionStack mbci_MlirIRSectionStack;
 
@@ -1665,11 +1690,11 @@ static MlirBytecodeStatus mbci_parseRegion(void *context,
       return mlirBytecodeEmitError(context, "unable to parse inline IR section data");
     
     // Store the isolated region's stream in the stack entry.
-    // We allocate a static inline stream for simplicity.
-    static MlirBytecodeStream isolatedStreamStorage[MLIRBC_IR_STACK_MAX_DEPTH];
-    isolatedStreamStorage[stack->top].pos = sectionData;
-    isolatedStreamStorage[stack->top].end = sectionData + sectionLength;
-    top->isolatedStream = &isolatedStreamStorage[stack->top];
+    // Use stack-local storage for thread-safety and reentrancy.
+    stack->isolatedStreamStorage[stack->top].pos = sectionData;
+    stack->isolatedStreamStorage[stack->top].end = sectionData + sectionLength;
+    stack->isolatedStreamStorage[stack->top].start = sectionData;
+    top->isolatedStream = &stack->isolatedStreamStorage[stack->top];
     
     // Now parse region content from the isolated stream.
     stream = top->isolatedStream;
@@ -1857,9 +1882,10 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
       
       bool indexPairEncoding = numIndicesWithFlag & 1;
       uint64_t numIndices = numIndicesWithFlag >> 1;
-      
+
       // Store in pending buffer if there's space.
-      if (cur->numPendingUseListOrders < 4 && numIndices <= 16) {
+      if (cur->numPendingUseListOrders < MLIRBC_MAX_PENDING_USE_LISTS &&
+          numIndices <= MLIRBC_MAX_USE_LIST_INDICES) {
         uint8_t idx = cur->numPendingUseListOrders++;
         cur->pendingUseListOrders[idx].resultIdx = (uint8_t)resultIdx;
         cur->pendingUseListOrders[idx].indexPairEncoding = indexPairEncoding ? 1 : 0;

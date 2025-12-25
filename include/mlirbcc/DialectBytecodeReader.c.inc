@@ -134,8 +134,6 @@ MlirBytecodeStatus mlirBytecodeDialectReaderReadAPIntWithKnownWidth(
     ret = mlirBytecodeParseByte(reader->context, reader->stream, &value);
     if (!mlirBytecodeSucceeded(ret))
       return ret;
-    return ret;
-
     result->U.value = value;
     return mlirBytecodeSuccess();
   }
