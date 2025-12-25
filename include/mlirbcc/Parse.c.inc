@@ -1960,6 +1960,12 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
     if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
       return mlirBytecodeEmitError(context, "invalid number of regions");
     }
+    // Validate numRegions fits in 15-bit field (max 32766, reserve 0x7FFF for overflow sentinel).
+    if (MLIRBC_UNLIKELY(numRegions >= 0x7FFF)) {
+      return mlirBytecodeEmitError(context, 
+        "number of regions (%llu) exceeds maximum (32766)", 
+        (unsigned long long)numRegions);
+    }
     cur->numRegionsRemaining = numRegions;
     cur->isIsolatedFromAbove = isIsolatedFromAbove;
     ret = mlirBytecodeOperationStateAddRegions(context, cur->opState,
