@@ -129,11 +129,14 @@ MlirBytecodeStatus mlirBytecodeEmitErrorImpl(void *context, const char *fmt,
 }
 #endif
 
-void *mlirBytecodeAllocate(void *context, size_t bytes) {
-  return malloc(bytes);
+static void *mlirBytecodeAllocate(void *context, size_t bytes) {
+  return NULL;
+  // return malloc(bytes);
 }
 
-void mlirBytecodeFree(void *context, void *ptr) { free(ptr); }
+static void mlirBytecodeFree(void *context, void *ptr) {
+  // free(ptr);
+}
 
 // Temporary allocation for large use-lists. Return NULL to indicate
 // allocation not supported - parsing will fail for use-lists > 64 entries.

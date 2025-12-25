@@ -1357,10 +1357,16 @@ struct mbci_MlirIRSectionStackEntry {
     // State of parent op as currently populated.
     MlirBytecodeOperationStateHandle opState;
     MlirBytecodeOperationHandle op;
+#ifdef MLIRBC_ENABLE_STACK_OVERFLOW
+    // For the last fixed stack entry: pointer to overflow entries when depth
+    // exceeds MLIRBC_IR_STACK_MAX_DEPTH. Size is 2*MLIRBC_IR_STACK_MAX_DEPTH.
+    // Sentinel: numRegionsRemaining == 0x7FFF indicates overflow active.
+    struct mbci_MlirIRSectionStackEntry *overflowEntries;
+#endif
   };
 
   // Number of regions to still complete parsing.
-  // Number of regions is assumed to be relatively small (<= 32767).
+  // Number of regions is assumed to be relatively small (< 32767).
   uint16_t numRegionsRemaining : 15;
   
   // Whether this region is isolated from above (v2+ uses separate IR section).
@@ -1401,6 +1407,75 @@ struct mbci_MlirIRSectionStack {
 };
 typedef struct mbci_MlirIRSectionStack mbci_MlirIRSectionStack;
 
+#ifdef MLIRBC_ENABLE_STACK_OVERFLOW
+// Sentinel value to indicate overflow array is active.
+#define MLIRBC_STACK_OVERFLOW_SENTINEL 0x7FFF
+
+// Get entry at specified index, handling overflow.
+static mbci_MlirIRSectionStackEntry *
+mbci_getStackEntry(mbci_MlirIRSectionStack *stack, int idx) {
+  if (idx < MLIRBC_IR_STACK_MAX_DEPTH) {
+    return &stack->data[idx];
+  }
+  // Overflow: last fixed entry holds pointer to overflow array.
+  mbci_MlirIRSectionStackEntry *last = &stack->data[MLIRBC_IR_STACK_MAX_DEPTH];
+  if (last->numRegionsRemaining == MLIRBC_STACK_OVERFLOW_SENTINEL &&
+      last->overflowEntries != NULL) {
+    return &last->overflowEntries[idx - MLIRBC_IR_STACK_MAX_DEPTH];
+  }
+  return NULL;  // Should not happen if stack management is correct.
+}
+
+static mbci_MlirIRSectionStackEntry *
+mbci_getStackTop(mbci_MlirIRSectionStack *stack) {
+  return mbci_getStackEntry(stack, stack->top);
+}
+static mbci_MlirIRSectionStackEntry *
+mbci_getStackWIP(mbci_MlirIRSectionStack *stack) {
+  return mbci_getStackEntry(stack, stack->top + 1);
+}
+
+// Initialize stack entry with required state to resume. `op` is initialized
+// already and so not passed in.
+static MlirBytecodeStatus
+mbci_mlirIRSectionStackPush(void *context, mbci_MlirIRSectionStack *stack) {
+  if (MLIRBC_UNLIKELY(stack->top + 1 >= MLIRBC_IR_STACK_MAX_DEPTH)) {
+    // Check if we can use overflow.
+    mbci_MlirIRSectionStackEntry *last = &stack->data[MLIRBC_IR_STACK_MAX_DEPTH];
+    if (stack->top + 1 == MLIRBC_IR_STACK_MAX_DEPTH) {
+      // First overflow: allocate if possible.
+      mbci_MlirIRSectionStackEntry *overflow = 
+          (mbci_MlirIRSectionStackEntry *)mlirBytecodeAllocateTemp(
+              context, 2 * MLIRBC_IR_STACK_MAX_DEPTH * sizeof(mbci_MlirIRSectionStackEntry));
+      if (overflow == NULL) {
+        mlirBytecodeEmitError(context, "IR stack max depth exceeded");
+        return mlirBytecodeIterationInterrupt();
+      }
+      last->overflowEntries = overflow;
+      last->numRegionsRemaining = MLIRBC_STACK_OVERFLOW_SENTINEL;
+    } else if (last->numRegionsRemaining != MLIRBC_STACK_OVERFLOW_SENTINEL ||
+               last->overflowEntries == NULL) {
+      mlirBytecodeEmitError(context, "IR stack max depth exceeded (no allocator)");
+      return mlirBytecodeIterationInterrupt();
+    }
+    // Check overflow bounds.
+    int overflowIdx = stack->top + 1 - MLIRBC_IR_STACK_MAX_DEPTH;
+    if (overflowIdx >= 2 * MLIRBC_IR_STACK_MAX_DEPTH) {
+      mlirBytecodeEmitError(context, "IR stack overflow exceeded");
+      return mlirBytecodeIterationInterrupt();
+    }
+  }
+  ++stack->top;
+  mbci_MlirIRSectionStackEntry *it = mbci_getStackTop(stack);
+  it->numBlocksRemaining = mbci_MlirIRSectionStackUnset;
+  it->numOpsRemaining = mbci_MlirIRSectionStackUnset;
+  it->isolatedStream = NULL;
+  // Note: isIsolatedFromAbove is already set on this entry from mbci_parseOperation.
+
+  return mlirBytecodeSuccess();
+}
+#else
+// Simple non-overflow stack access.
 static mbci_MlirIRSectionStackEntry *
 mbci_getStackTop(mbci_MlirIRSectionStack *stack) {
   return &stack->data[stack->top];
@@ -1410,8 +1485,6 @@ mbci_getStackWIP(mbci_MlirIRSectionStack *stack) {
   return &stack->data[stack->top + 1];
 }
 
-// Initialize stack entry with required state to resume. `op` is initialized
-// already and so not passed in.
 static MlirBytecodeStatus
 mbci_mlirIRSectionStackPush(void *context, mbci_MlirIRSectionStack *stack) {
   if (MLIRBC_UNLIKELY(stack->top == MLIRBC_IR_STACK_MAX_DEPTH)) {
@@ -1423,10 +1496,9 @@ mbci_mlirIRSectionStackPush(void *context, mbci_MlirIRSectionStack *stack) {
   it->numBlocksRemaining = mbci_MlirIRSectionStackUnset;
   it->numOpsRemaining = mbci_MlirIRSectionStackUnset;
   it->isolatedStream = NULL;
-  // Note: isIsolatedFromAbove is already set on this entry from mbci_parseOperation.
-
   return mlirBytecodeSuccess();
 }
+#endif
 
 static MlirBytecodeStatus
 mbci_mlirIRSectionStackPop(void *context, mbci_MlirIRSectionStack *stack) {
