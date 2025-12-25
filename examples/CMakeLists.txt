@@ -1,4 +1,5 @@
 add_subdirectory(Printer)
+add_subdirectory(Stub)
 if(IS_DIRECTORY ${MLIR_DIR})
   add_subdirectory(MlirBuilder)
 endif()
