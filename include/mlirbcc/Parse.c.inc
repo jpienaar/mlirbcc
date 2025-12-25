@@ -1477,6 +1477,22 @@ mbci_getStackEntry(mbci_MlirIRSectionStack *stack, int idx) {
   return NULL; // Should not happen if stack management is correct.
 }
 
+// Get isolated stream storage at specified index, handling overflow.
+// Uses start==NULL as sentinel in last entry, with pos holding overflow pointer.
+static MlirBytecodeStream *
+mbci_getIsolatedStream(mbci_MlirIRSectionStack *stack, int idx) {
+  if (idx < MLIRBC_IR_STACK_MAX_DEPTH) {
+    return &stack->isolatedStreamStorage[idx];
+  }
+  // Overflow: last entry uses start==NULL sentinel, pos holds overflow array.
+  MlirBytecodeStream *last = &stack->isolatedStreamStorage[MLIRBC_IR_STACK_MAX_DEPTH];
+  if (last->start == NULL && last->pos != NULL) {
+    MlirBytecodeStream *overflow = (MlirBytecodeStream *)(void *)last->pos;
+    return &overflow[idx - MLIRBC_IR_STACK_MAX_DEPTH];
+  }
+  return NULL; // Should not happen if stack management is correct.
+}
+
 static mbci_MlirIRSectionStackEntry *
 mbci_getStackTop(mbci_MlirIRSectionStack *stack) {
   return mbci_getStackEntry(stack, stack->top);
@@ -1506,6 +1522,25 @@ mbci_mlirIRSectionStackPush(void *context, mbci_MlirIRSectionStack *stack) {
       }
       last->overflowEntries = overflow;
       last->numRegionsRemaining = MLIRBC_STACK_OVERFLOW_SENTINEL;
+      
+      // Also allocate overflow for isolated stream storage.
+      MlirBytecodeStream *streamOverflow =
+          (MlirBytecodeStream *)mlirBytecodeAllocateTemp(
+              context, 2 * MLIRBC_IR_STACK_MAX_DEPTH *
+                           sizeof(MlirBytecodeStream));
+      if (streamOverflow == NULL) {
+        // Clean up previously allocated overflow.
+        mlirBytecodeFreeTemp(context, overflow);
+        last->overflowEntries = NULL;
+        last->numRegionsRemaining = 0;
+        mlirBytecodeEmitError(context, "IR stack overflow allocation failed");
+        return mlirBytecodeIterationInterrupt();
+      }
+      // Use NULL sentinel: start==NULL, pos holds pointer.
+      MlirBytecodeStream *streamLast = &stack->isolatedStreamStorage[MLIRBC_IR_STACK_MAX_DEPTH];
+      streamLast->start = NULL;
+      streamLast->pos = (const uint8_t *)(void *)streamOverflow;
+      streamLast->end = NULL;
     } else if (last->numRegionsRemaining != MLIRBC_STACK_OVERFLOW_SENTINEL ||
                last->overflowEntries == NULL) {
       mlirBytecodeEmitError(context,
@@ -1735,10 +1770,11 @@ static MlirBytecodeStatus mbci_parseRegion(void *context,
 
     // Store the isolated region's stream in the stack entry.
     // Use stack-local storage for thread-safety and reentrancy.
-    stack->isolatedStreamStorage[stack->top].pos = sectionData;
-    stack->isolatedStreamStorage[stack->top].end = sectionData + sectionLength;
-    stack->isolatedStreamStorage[stack->top].start = sectionData;
-    top->isolatedStream = &stack->isolatedStreamStorage[stack->top];
+    MlirBytecodeStream *isolatedStorage = mbci_getIsolatedStream(stack, stack->top);
+    isolatedStorage->pos = sectionData;
+    isolatedStorage->end = sectionData + sectionLength;
+    isolatedStorage->start = sectionData;
+    top->isolatedStream = isolatedStorage;
 
     // Now parse region content from the isolated stream.
     stream = top->isolatedStream;
@@ -2167,6 +2203,22 @@ mlirBytecodeParseIRSection(void *context, MlirBytecodeParserState *parserState,
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
+
+#ifndef MLIRBC_NO_OVERFLOW_IR_STACK
+  // Clean up overflow arrays if allocated.
+  mbci_MlirIRSectionStackEntry *last = &stack.data[MLIRBC_IR_STACK_MAX_DEPTH];
+  if (last->numRegionsRemaining == MLIRBC_STACK_OVERFLOW_SENTINEL) {
+    if (last->overflowEntries) {
+      mlirBytecodeFreeTemp(context, last->overflowEntries);
+    }
+    // Clean up isolated stream overflow.
+    MlirBytecodeStream *streamLast = &stack.isolatedStreamStorage[MLIRBC_IR_STACK_MAX_DEPTH];
+    if (streamLast->start == NULL && streamLast->pos != NULL) {
+      mlirBytecodeFreeTemp(context, (void *)streamLast->pos);
+    }
+  }
+#endif
+
   return mlirBytecodeSuccess();
 }
 
@@ -2390,6 +2442,21 @@ MlirBytecodeStatus mlirBytecodeParseDeferredRegion(
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
+
+#ifndef MLIRBC_NO_OVERFLOW_IR_STACK
+  // Clean up overflow arrays if allocated.
+  mbci_MlirIRSectionStackEntry *last = &stack.data[MLIRBC_IR_STACK_MAX_DEPTH];
+  if (last->numRegionsRemaining == MLIRBC_STACK_OVERFLOW_SENTINEL) {
+    if (last->overflowEntries) {
+      mlirBytecodeFreeTemp(context, last->overflowEntries);
+    }
+    // Clean up isolated stream overflow.
+    MlirBytecodeStream *streamLast = &stack.isolatedStreamStorage[MLIRBC_IR_STACK_MAX_DEPTH];
+    if (streamLast->start == NULL && streamLast->pos != NULL) {
+      mlirBytecodeFreeTemp(context, (void *)streamLast->pos);
+    }
+  }
+#endif
 
   return mlirBytecodeSuccess();
 }
