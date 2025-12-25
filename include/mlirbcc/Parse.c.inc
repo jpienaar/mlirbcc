@@ -682,7 +682,7 @@ MlirBytecodeStatus mlirBytecodeParseHandle(void *context,
   return mlirBytecodeParseVarInt(context, stream, &result->id);
 }
 
-__attribute__((used)) MlirBytecodeStatus
+MlirBytecodeStatus
 mlirBytecodeSkipHandles(void *context, MlirBytecodeStream *stream, uint64_t n) {
   return mbci_skipVarInts(context, stream, n);
 }
