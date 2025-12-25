@@ -138,6 +138,7 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeOperationStatePop(
     void *context, MlirBytecodeOperationStateHandle opStateHandle,
     MlirBytecodeOperationHandle *opHandle);
 
+#ifndef MLIRBC_NO_LAZY_LOADING
 /// Check if an operation was lazily loaded (regions deferred for later parsing).
 MLIRBC_DEF bool mlirBytecodeOperationWasLazyLoaded(
     void *context, MlirBytecodeOperationHandle opHandle);
@@ -150,6 +151,7 @@ MLIRBC_DEF void mlirBytecodeStoreDeferredRegionData(
 /// Get the number of regions in an operation.
 MLIRBC_DEF uint64_t mlirBytecodeGetOperationNumRegions(
     MlirBytecodeOperationHandle opHandle);
+#endif // MLIRBC_NO_LAZY_LOADING
 
 /// Called when entering a region with numBlocks blocks and numValues Values
 /// (including values due to block args).
@@ -233,6 +235,8 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeDialectOpWithRegisteredCallBack(
     void *context, MlirBytecodeOpHandle, MlirBytecodeDialectHandle,
     MlirBytecodeStringHandle, bool isRegistered);
 
+
+#ifndef MLIRBC_NO_RESOURCES
 /// Invoked when starting parsing of group of resources.
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceDialectGroupEnter(
     void *context, MlirBytecodeDialectHandle dialect,
@@ -257,6 +261,8 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceEmptyCallBack(
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeResourceStringCallBack(
     void *context, MlirBytecodeStringHandle resourceKey,
     MlirBytecodeStringHandle);
+#endif // MLIRBC_NO_RESOURCES
+
 
 /// Invoked when entering strings section with total number of strings.
 MLIRBC_DEF MlirBytecodeStatus
@@ -1215,6 +1221,7 @@ mlirBytecodeParseAttributeAndTypeSection(void *context,
   return mlirBytecodeSuccess();
 }
 
+#ifndef MLIRBC_NO_RESOURCES
 MlirBytecodeStatus
 mlirBytecodeParseResourceSection(void *context,
                                  MlirBytecodeParserState *const parserState) {
@@ -1366,6 +1373,8 @@ mlirBytecodeParseResourceSection(void *context,
   }
   return mlirBytecodeSuccess();
 }
+#endif // MLIRBC_NO_RESOURCES
+
 
 enum {
   // Sentinel value to indicate unset number of blocks & ops remaining.
@@ -1379,7 +1388,7 @@ struct mbci_MlirIRSectionStackEntry {
     // State of parent op as currently populated.
     MlirBytecodeOperationStateHandle opState;
     MlirBytecodeOperationHandle op;
-#ifdef MLIRBC_ENABLE_STACK_OVERFLOW
+#ifndef MLIRBC_NO_OVERFLOW_IR_STACK
     // For the last fixed stack entry: pointer to overflow entries when depth
     // exceeds MLIRBC_IR_STACK_MAX_DEPTH. Size is 2*MLIRBC_IR_STACK_MAX_DEPTH.
     // Sentinel: numRegionsRemaining == 0x7FFF indicates overflow active.
@@ -1432,7 +1441,8 @@ struct mbci_MlirIRSectionStack {
 };
 typedef struct mbci_MlirIRSectionStack mbci_MlirIRSectionStack;
 
-#ifdef MLIRBC_ENABLE_STACK_OVERFLOW
+
+#ifndef MLIRBC_NO_OVERFLOW_IR_STACK
 // Sentinel value to indicate overflow array is active.
 #define MLIRBC_STACK_OVERFLOW_SENTINEL 0x7FFF
 
@@ -1667,6 +1677,7 @@ static MlirBytecodeStatus mbci_parseRegion(void *context,
                                            void *state) {
   mbci_MlirIRSectionStackEntry *top = mbci_getStackTop(stack);
   
+#ifndef MLIRBC_NO_LAZY_LOADING
   // For v2+ with isolated regions, parse the inline IR section first.
   // The isIsolatedFromAbove flag is set on the current stack top (the operation with regions).
   if (parserState->version >= mbci_kLazyLoading && top->isIsolatedFromAbove) {
@@ -1699,6 +1710,7 @@ static MlirBytecodeStatus mbci_parseRegion(void *context,
     // Now parse region content from the isolated stream.
     stream = top->isolatedStream;
   }
+#endif // MLIRBC_NO_LAZY_LOADING
   
   uint64_t numBlocksRemaining;
   MlirBytecodeStatus ret =
@@ -1978,7 +1990,9 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
   }
 #endif
 
+
   if (encodingMask & kHasInlineRegions) {
+#ifndef MLIRBC_NO_LAZY_LOADING
     // If the operation was lazily loaded, skip region processing.
     // The regions will be parsed later when materialized.
     if (mlirBytecodeOperationWasLazyLoaded(context, opHandle)) {
@@ -2005,6 +2019,7 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
       --mbci_getStackTop(stack)->numOpsRemaining;
       return ret;
     }
+#endif // MLIRBC_NO_LAZY_LOADING
     return mbci_mlirIRSectionStackPush(context, stack);
   }
 
@@ -2177,10 +2192,12 @@ MlirBytecodeStatus mlirBytecodeParse(void *context,
   ret = mlirBytecodeParseDialectSection(context, parserState);
   if (!mlirBytecodeSucceeded(ret))
     return ret;
+#ifndef MLIRBC_NO_RESOURCES
   // Process the resource section if present.
   ret = mlirBytecodeParseResourceSection(context, parserState);
   if (!mlirBytecodeSucceeded(ret))
     return ret;
+#endif
   // Process the attribute and type section.
   ret = mlirBytecodeParseAttributeAndTypeSection(context, parserState);
   if (!mlirBytecodeSucceeded(ret))
@@ -2190,6 +2207,7 @@ MlirBytecodeStatus mlirBytecodeParse(void *context,
   return mlirBytecodeParseIRSection(context, parserState, retBlock);
 }
 
+#ifndef MLIRBC_NO_LAZY_LOADING
 /// Parse a deferred region from stored bytecode data.
 /// This is used for lazy loading materialization.
 MlirBytecodeStatus mlirBytecodeParseDeferredRegion(
@@ -2313,3 +2331,4 @@ MlirBytecodeStatus mlirBytecodeParseDeferredRegion(
   
   return mlirBytecodeSuccess();
 }
+#endif // MLIRBC_NO_LAZY_LOADING
