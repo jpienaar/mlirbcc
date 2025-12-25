@@ -397,14 +397,15 @@ enum TypeCode {
 static MlirBytecodeStatus parseIntegerAttr(MlirBytecodeDialectReader *reader,
                                            MlirBytecodeAttrHandle attrHandle) {
   MlirBytecodeTypeHandle typeHandle;
-  if (mlirBytecodeFailed(mlirBytecodeDialectReaderReadType(reader, &typeHandle)))
+  if (mlirBytecodeFailed(
+          mlirBytecodeDialectReaderReadType(reader, &typeHandle)))
     return mlirBytecodeFailure();
   // Example of tricky case: without being able to construct the type, there
   // is nothing to query the bitwidth of the type except to ask the
   // implementation what width the type handle has.
   unsigned width;
-  MlirBytecodeStatus ret = 
-      mlirBytecodeQueryBuiltinIntegerTypeWidth(reader->context, typeHandle, &width);
+  MlirBytecodeStatus ret = mlirBytecodeQueryBuiltinIntegerTypeWidth(
+      reader->context, typeHandle, &width);
   if (!mlirBytecodeHandled(ret))
     return ret;
   if (mlirBytecodeFailed(ret))
@@ -415,7 +416,8 @@ static MlirBytecodeStatus parseIntegerAttr(MlirBytecodeDialectReader *reader,
     return mlirBytecodeUnhandled();
 
   MlirBytecodeAPInt val;
-  ret = mlirBytecodeDialectReaderReadAPIntWithKnownWidth(reader, width, NULL, &val);
+  ret = mlirBytecodeDialectReaderReadAPIntWithKnownWidth(reader, width, NULL,
+                                                         &val);
   return mlirBytecodeCreateBuiltinIntegerAttr(reader->context, attrHandle,
                                               typeHandle, val.U.value);
 }
@@ -432,59 +434,60 @@ MlirBytecodeStatus mlirBytecodeGetNextDictionaryHandles(
   return mlirBytecodeSuccess();
 }
 
-static MlirBytecodeStatus parseDictionaryAttr(MlirBytecodeDialectReader *reader,
-                                              MlirBytecodeAttrHandle attrHandle) {
+static MlirBytecodeStatus
+parseDictionaryAttr(MlirBytecodeDialectReader *reader,
+                    MlirBytecodeAttrHandle attrHandle) {
   uint64_t size;
-  if (mlirBytecodeFailed(
-    mlirBytecodeDialectReaderReadVarInt(reader, &size)))
+  if (mlirBytecodeFailed(mlirBytecodeDialectReaderReadVarInt(reader, &size)))
     return mlirBytecodeFailure();
-  MlirDictionaryHandleIterator iterator = {.stream = *reader->stream, .count = size};
+  MlirDictionaryHandleIterator iterator = {.stream = *reader->stream,
+                                           .count = size};
   return mlirBytecodeCreateBuiltinDictionaryAttr(reader->context, attrHandle,
                                                  &iterator);
 }
 
-static MlirBytecodeStatus parseFileLineColLoc(MlirBytecodeDialectReader *reader,
-                                              MlirBytecodeAttrHandle attrHandle) {
+static MlirBytecodeStatus
+parseFileLineColLoc(MlirBytecodeDialectReader *reader,
+                    MlirBytecodeAttrHandle attrHandle) {
   uint64_t filename, line, col;
-  if (mlirBytecodeFailed(mlirBytecodeDialectReaderReadVarInt(reader, &filename)) ||
+  if (mlirBytecodeFailed(
+          mlirBytecodeDialectReaderReadVarInt(reader, &filename)) ||
       mlirBytecodeFailed(mlirBytecodeDialectReaderReadVarInt(reader, &line)) ||
       mlirBytecodeFailed(mlirBytecodeDialectReaderReadVarInt(reader, &col)))
     return mlirBytecodeFailure();
   return mlirBytecodeCreateBuiltinFileLineColLoc(
-      reader->context, attrHandle, (MlirBytecodeAttrHandle){.id = filename}, line,
-      col);
+      reader->context, attrHandle, (MlirBytecodeAttrHandle){.id = filename},
+      line, col);
 }
 
 static MlirBytecodeStatus parseStringAttr(MlirBytecodeDialectReader *reader,
-                                              MlirBytecodeAttrHandle attrHandle) {
+                                          MlirBytecodeAttrHandle attrHandle) {
   MlirBytecodeBytesRef bytes;
-  if (mlirBytecodeFailed(
-    mlirBytecodeDialectReaderReadString(reader,&bytes)))
+  if (mlirBytecodeFailed(mlirBytecodeDialectReaderReadString(reader, &bytes)))
     return mlirBytecodeFailure();
-  return mlirBytecodeCreateBuiltinStringAttr(reader->context, attrHandle, bytes);
+  return mlirBytecodeCreateBuiltinStringAttr(reader->context, attrHandle,
+                                             bytes);
 }
 
 static MlirBytecodeStatus
 parseStringAttrWithType(MlirBytecodeDialectReader *reader,
-                             MlirBytecodeAttrHandle attrHandle
-) {
+                        MlirBytecodeAttrHandle attrHandle) {
   MlirBytecodeTypeHandle type;
   MlirBytecodeBytesRef value;
-  if (mlirBytecodeSucceeded(
-    mlirBytecodeDialectReaderReadType(reader, &type)) &&
+  if (mlirBytecodeSucceeded(mlirBytecodeDialectReaderReadType(reader, &type)) &&
       mlirBytecodeSucceeded(
-        mlirBytecodeDialectReaderReadString(reader, &value)))
-    return mlirBytecodeCreateBuiltinStringAttrWithType(
-        reader->context, attrHandle, value, type);
+          mlirBytecodeDialectReaderReadString(reader, &value)))
+    return mlirBytecodeCreateBuiltinStringAttrWithType(reader->context,
+                                                       attrHandle, value, type);
   return mlirBytecodeEmitError(reader->context, "invalid StringAttrWithType");
 }
 
 static MlirBytecodeStatus parseTypeAttr(MlirBytecodeDialectReader *reader,
-                             MlirBytecodeAttrHandle attrHandle) {
+                                        MlirBytecodeAttrHandle attrHandle) {
   MlirBytecodeTypeHandle value;
-  if (mlirBytecodeSucceeded(
-    mlirBytecodeDialectReaderReadType(reader, &value)))
-    return mlirBytecodeCreateBuiltinTypeAttr(reader->context, attrHandle, value);
+  if (mlirBytecodeSucceeded(mlirBytecodeDialectReaderReadType(reader, &value)))
+    return mlirBytecodeCreateBuiltinTypeAttr(reader->context, attrHandle,
+                                             value);
 
   return mlirBytecodeEmitError(reader->context, "invalid TypeAttr");
 }
@@ -522,21 +525,21 @@ mlirBytecodeParseBuiltinAttr(MlirBytecodeDialectReader *reader,
   return mlirBytecodeSuccess();
 }
 
-static MlirBytecodeStatus parseFloat32Type(MlirBytecodeDialectReader* reader,
+static MlirBytecodeStatus parseFloat32Type(MlirBytecodeDialectReader *reader,
                                            MlirBytecodeTypeHandle typeHandle) {
   return mlirBytecodeCreateBuiltinFloat32Type(reader->context, typeHandle);
 }
 
-static MlirBytecodeStatus parseIndexType(MlirBytecodeDialectReader* reader,
-                                           MlirBytecodeTypeHandle typeHandle) {
+static MlirBytecodeStatus parseIndexType(MlirBytecodeDialectReader *reader,
+                                         MlirBytecodeTypeHandle typeHandle) {
   return mlirBytecodeCreateBuiltinIndexType(reader->context, typeHandle);
 }
 
-static MlirBytecodeStatus parseIntegerType(MlirBytecodeDialectReader* reader,
+static MlirBytecodeStatus parseIntegerType(MlirBytecodeDialectReader *reader,
                                            MlirBytecodeTypeHandle typeHandle) {
   uint64_t _widthAndSignedness, signedness, width;
-  if (mlirBytecodeSucceeded(mlirBytecodeDialectReaderReadVarInt(reader,
-                                                    &_widthAndSignedness)) &&
+  if (mlirBytecodeSucceeded(
+          mlirBytecodeDialectReaderReadVarInt(reader, &_widthAndSignedness)) &&
       mlirBytecodeSucceeded(
           ((signedness = _widthAndSignedness & 0x3), mlirBytecodeSuccess())) &&
       mlirBytecodeSucceeded(
@@ -548,16 +551,15 @@ static MlirBytecodeStatus parseIntegerType(MlirBytecodeDialectReader* reader,
   return mlirBytecodeEmitError(reader->context, "invalid IntegerType");
 }
 
-static MlirBytecodeStatus parseFunctionType(MlirBytecodeDialectReader* reader,
-                                           MlirBytecodeTypeHandle typeHandle
-) {
+static MlirBytecodeStatus parseFunctionType(MlirBytecodeDialectReader *reader,
+                                            MlirBytecodeTypeHandle typeHandle) {
   // FIXME
   return mlirBytecodeCreateBuiltinFunctionType(reader->context, typeHandle);
 }
 
 static MlirBytecodeStatus
-parseRankedTensorType(MlirBytecodeDialectReader* reader,
-                                           MlirBytecodeTypeHandle typeHandle) {
+parseRankedTensorType(MlirBytecodeDialectReader *reader,
+                      MlirBytecodeTypeHandle typeHandle) {
   // FIXME
   return mlirBytecodeCreateBuiltinRankedTensorType(reader->context, typeHandle);
 }

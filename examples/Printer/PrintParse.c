@@ -142,7 +142,7 @@ static void mlirBytecodeFree(void *context, void *ptr) {
 // allocation not supported - parsing will fail for use-lists > 64 entries.
 // Alternatively, implementations can use malloc() here.
 void *mlirBytecodeAllocateTemp(void *context, size_t bytes) {
-  return NULL;  // No dynamic allocation - rely on stack buffer only
+  return NULL; // No dynamic allocation - rely on stack buffer only
 }
 
 void mlirBytecodeFreeTemp(void *context, void *ptr) {
@@ -515,8 +515,8 @@ MlirBytecodeStatus mlirBytecodeQueryBuiltinIntegerTypeWidth(
 
 // ----
 
-MLIRBC_DEF MlirBytecodeStatus mlirBytecodeAttributesPush(void *context,
-                                                     MlirBytecodeSize total) {
+MLIRBC_DEF MlirBytecodeStatus
+mlirBytecodeAttributesPush(void *context, MlirBytecodeSize total) {
   ParsingState *state = context;
   // Note: this currently assumes that number of state->attributes don't change.
   if (state->attributes) {
@@ -533,11 +533,10 @@ MLIRBC_DEF MlirBytecodeStatus mlirBytecodeAttributesPush(void *context,
   return mlirBytecodeSuccess();
 }
 
-MLIRBC_DEF MlirBytecodeStatus
-mlirBytecodeAssociateAttributeRange(void *context,
-                                    MlirBytecodeAttrHandle attrHandle,
-                                    MlirBytecodeDialectHandle dialectHandle,
-                                    MlirBytecodeBytesRef str, bool hasCustom) {
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeAssociateAttributeRange(
+    void *context, MlirBytecodeAttrHandle attrHandle,
+    MlirBytecodeDialectHandle dialectHandle, MlirBytecodeBytesRef str,
+    bool hasCustom) {
   ParsingState *state = context;
   state->attributeRange[attrHandle.id].bytes = str;
   state->attributeRange[attrHandle.id].hasCustom = hasCustom;
@@ -546,7 +545,7 @@ mlirBytecodeAssociateAttributeRange(void *context,
 }
 
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeTypesPush(void *context,
-                                                MlirBytecodeSize total) {
+                                                    MlirBytecodeSize total) {
   ParsingState *state = context;
   if (state->types) {
     free(state->types);
@@ -606,12 +605,10 @@ mlirBytecodeDialectVersionCallBack(void *context,
   return mlirBytecodeSuccess();
 }
 
-MlirBytecodeStatus
-mlirBytecodeDialectOpWithRegisteredCallBack(void *context,
-                                            MlirBytecodeOpHandle opHdl,
-                                            MlirBytecodeDialectHandle dialectHandle,
-                                            MlirBytecodeStringHandle stringHdl,
-                                            bool isRegistered) {
+MlirBytecodeStatus mlirBytecodeDialectOpWithRegisteredCallBack(
+    void *context, MlirBytecodeOpHandle opHdl,
+    MlirBytecodeDialectHandle dialectHandle, MlirBytecodeStringHandle stringHdl,
+    bool isRegistered) {
   ParsingState *state = context;
   mlirBytecodeEmitDebug("\t\tdialect[%d] :: op[%d] = %d (registered=%d)",
                         (int)dialectHandle.id, (int)opHdl.id, (int)stringHdl.id,
@@ -772,16 +769,17 @@ mlirBytecodeOperationRegionPop(void *context,
   return mlirBytecodeSuccess();
 }
 
-// Lazy loading callbacks these are no-ops since the printer doesn't support lazy loading.
+// Lazy loading callbacks these are no-ops since the printer doesn't support
+// lazy loading.
 
-void mlirBytecodeStoreDeferredRegionData(
-    void *context, MlirBytecodeOperationHandle opHandle,
-    const uint8_t *data, uint64_t length) {
+void mlirBytecodeStoreDeferredRegionData(void *context,
+                                         MlirBytecodeOperationHandle opHandle,
+                                         const uint8_t *data, uint64_t length) {
   // No-op: printer doesn't use lazy loading.
 }
 
-uint64_t mlirBytecodeGetOperationNumRegions(
-    MlirBytecodeOperationHandle opHandle) {
+uint64_t
+mlirBytecodeGetOperationNumRegions(MlirBytecodeOperationHandle opHandle) {
   // Printer operations don't track regions.
   return 0;
 }
@@ -792,11 +790,14 @@ bool mlirBytecodeOperationWasLazyLoaded(void *context,
   return false;
 }
 
-// Use-list ordering callbacks these are no-ops since the printer doesn't reorder use-lists.
+// Use-list ordering callbacks these are no-ops since the printer doesn't
+// reorder use-lists.
 
-MlirBytecodeStatus mlirBytecodeBlockArgAddUseListOrder(
-    void *context, uint64_t valueIndex, bool indexPairEncoding,
-    const uint64_t *indices, uint64_t numIndices) {
+MlirBytecodeStatus mlirBytecodeBlockArgAddUseListOrder(void *context,
+                                                       uint64_t valueIndex,
+                                                       bool indexPairEncoding,
+                                                       const uint64_t *indices,
+                                                       uint64_t numIndices) {
   // No-op: printer doesn't track use-list ordering
   return mlirBytecodeSuccess();
 }

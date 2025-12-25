@@ -25,11 +25,11 @@ typedef struct MlirBytecodeAPInt MlirBytecodeAPInt;
 
 // Parse custom bytecode and associate attr handle with parsed attribute.
 typedef MlirBytecodeStatus (*MlirBytecodeAttrParseCallBack)(
-    MlirBytecodeDialectReader* reader, MlirBytecodeAttrHandle);
+    MlirBytecodeDialectReader *reader, MlirBytecodeAttrHandle);
 
 // Parse custom bytecode and associate type handle with parsed type.
 typedef MlirBytecodeStatus (*MlirBytecodeTypeParseCallBack)(
-    MlirBytecodeDialectReader* reader, MlirBytecodeTypeHandle);
+    MlirBytecodeDialectReader *reader, MlirBytecodeTypeHandle);
 
 static MlirBytecodeStatus
 mlirBytecodeDialectReaderReadAttribute(MlirBytecodeDialectReader *reader,
@@ -116,8 +116,8 @@ MlirBytecodeStatus
 mlirBytecodeDialectReaderReadSignedVarInt(MlirBytecodeDialectReader *reader,
                                           int64_t *result) {
   uint64_t unsignedResult;
-  MlirBytecodeStatus ret = mlirBytecodeParseSignedVarInt(reader->context, reader->stream,
-	  &unsignedResult);
+  MlirBytecodeStatus ret = mlirBytecodeParseSignedVarInt(
+      reader->context, reader->stream, &unsignedResult);
   *result = (int64_t)unsignedResult;
   return ret;
 }
@@ -155,8 +155,8 @@ MlirBytecodeStatus mlirBytecodeDialectReaderReadAPIntWithKnownWidth(
     return mlirBytecodeUnhandled();
 
   uint64_t numActiveWords;
-  ret = mlirBytecodeParseVarInt(reader->context, reader->stream,
-                                &numActiveWords);
+  ret =
+      mlirBytecodeParseVarInt(reader->context, reader->stream, &numActiveWords);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
 
@@ -191,8 +191,8 @@ mlirBytecodeDialectReaderReadBlob(MlirBytecodeDialectReader *reader,
       mlirBytecodeDialectReaderReadVarInt(reader, &result->length);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
-  return mlirBytecodeParseBytes(reader->context, reader->stream,
-                                result->length, &result->data);
+  return mlirBytecodeParseBytes(reader->context, reader->stream, result->length,
+                                &result->data);
 }
 
 MlirBytecodeStatus mlirBytecodeDialectReaderReadResourceHandle(
