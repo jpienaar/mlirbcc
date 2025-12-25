@@ -135,6 +135,17 @@ void *mlirBytecodeAllocate(void *context, size_t bytes) {
 
 void mlirBytecodeFree(void *context, void *ptr) { free(ptr); }
 
+// Temporary allocation for large use-lists. Return NULL to indicate
+// allocation not supported - parsing will fail for use-lists > 64 entries.
+// Alternatively, implementations can use malloc() here.
+void *mlirBytecodeAllocateTemp(void *context, size_t bytes) {
+  return NULL;  // No dynamic allocation - rely on stack buffer only
+}
+
+void mlirBytecodeFreeTemp(void *context, void *ptr) {
+  // No-op since AllocateTemp returns NULL
+}
+
 MlirBytecodeBytesRef getString(void *context, MlirBytecodeStringHandle hdl) {
   ParsingState *state = context;
   assert(state->strings);

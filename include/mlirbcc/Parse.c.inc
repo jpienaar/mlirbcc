@@ -278,6 +278,18 @@ mlirBytecodeParseType(void *context, MlirBytecodeTypeHandle handle);
 MLIRBC_DEF MlirBytecodeStatus mlirBytecodeGetStringSectionValue(
     void *context, MlirBytecodeStringHandle idx, MlirBytecodeBytesRef *result);
 
+/// Allocate temporary memory for parsing. Returns NULL if allocation is not
+/// supported or fails. Implementations can:
+/// - Return NULL to indicate no dynamic allocation (parse will fail for large
+///   use-lists)
+/// - Use malloc() or custom allocator
+/// If this always returns NULL, the compiler can optimize away the call.
+MLIRBC_DEF void *mlirBytecodeAllocateTemp(void *context, size_t bytes);
+
+/// Free temporary memory allocated by mlirBytecodeAllocateTemp.
+/// Only called if mlirBytecodeAllocateTemp returned non-NULL.
+MLIRBC_DEF void mlirBytecodeFreeTemp(void *context, void *ptr);
+
 #ifdef MLIRBC_VERBOSE_ERROR
 /// Returns failure status post emitting error using same format message as
 /// printf.
@@ -1516,18 +1528,19 @@ static MlirBytecodeStatus mbci_parseBlock(void *context,
         uint64_t indicesBuf[64];  // Stack buffer for small cases
         uint64_t *indices = indicesBuf;
         if (numIndices > 64) {
-          // TODO: This should be optional rather than required to use malloc or
-          // any allocator.
-          indices = (uint64_t *)malloc(numIndices * sizeof(uint64_t));
+          // Try to allocate via user-provided callback. If it returns NULL,
+          // we cannot handle this use-list (too large for stack buffer).
+          indices = (uint64_t *)mlirBytecodeAllocateTemp(
+              context, numIndices * sizeof(uint64_t));
           if (!indices)
-            return mlirBytecodeEmitError(context, "failed to allocate use-list indices");
+            return mlirBytecodeEmitError(context,
+                "use-list too large for stack buffer and allocation not supported");
         }
         
         for (uint64_t i = 0; i < numIndices; ++i) {
           ret = mlirBytecodeParseVarInt(context, stream, &indices[i]);
           if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
-            // TODO: Optional allocation.
-            if (indices != indicesBuf) free(indices);
+            if (indices != indicesBuf) mlirBytecodeFreeTemp(context, indices);
             return mlirBytecodeEmitError(context, "invalid block arg use-list index value");
           }
         }
@@ -1535,7 +1548,7 @@ static MlirBytecodeStatus mbci_parseBlock(void *context,
         // Call the callback to store the use-list order.
         ret = mlirBytecodeBlockArgAddUseListOrder(context, argIdx, indexPairEncoding,
                                                    indices, numIndices);
-        if (indices != indicesBuf) free(indices);
+        if (indices != indicesBuf) mlirBytecodeFreeTemp(context, indices);
         if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
           return ret;
       }
