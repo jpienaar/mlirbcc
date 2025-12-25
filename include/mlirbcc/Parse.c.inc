@@ -72,7 +72,9 @@ static bool mlirBytecodeParserStateEmpty(MlirBytecodeParserState *parserState);
 
 //===----------------------------------------------------------------------===//
 // Functions required to be defined:
+#ifndef MLIRBC_DEF
 #define MLIRBC_DEF static
+#endif
 
 // - IR section hooks.
 
@@ -470,12 +472,14 @@ static bool mlirBytecodeStreamEmpty(MlirBytecodeStream *stream);
 
 // MLIRBC_ATTRIBUTE_NOINLINE - On compilers where we have a directive to do so,
 // mark a method "not for inlining".
+#ifndef MLIRBC_ATTRIBUTE_NOINLINE
 #if __has_attribute(noinline)
 #define MLIRBC_ATTRIBUTE_NOINLINE __attribute__((noinline))
 #elif defined(_MSC_VER)
 #define MLIRBC_ATTRIBUTE_NOINLINE __declspec(noinline)
 #else
 #define MLIRBC_ATTRIBUTE_NOINLINE
+#endif
 #endif
 
 // Convention followed in this file is to prefix implementation details with
@@ -1373,6 +1377,7 @@ struct mbci_MlirIRSectionStackEntry {
   // When null, uses the parent stream.
   MlirBytecodeStream *isolatedStream;
   
+#ifndef MLIRBC_NO_USE_LIST_ORDERING
   // Pending use-list orders for operation results (stored during parsing,
   // applied after op creation). Max 16 results with use-list orders per op,
   // each with max 64 indices.
@@ -1383,6 +1388,7 @@ struct mbci_MlirIRSectionStackEntry {
     uint8_t numIndices;
     uint16_t indices[16];  // Max 16 indices stored inline
   } pendingUseListOrders[4];  // Max 4 results with use-lists
+#endif
 };
 typedef struct mbci_MlirIRSectionStackEntry mbci_MlirIRSectionStackEntry;
 
@@ -1651,7 +1657,9 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
   mbci_MlirIRSectionStackEntry *cur = mbci_getStackWIP(stack);
   // Initialize isIsolatedFromAbove and pending use-lists to clear stale values.
   cur->isIsolatedFromAbove = 0;
+#ifndef MLIRBC_NO_USE_LIST_ORDERING
   cur->numPendingUseListOrders = 0;
+#endif
   ret = mlirBytecodeOperationStatePush(context, name, loc, &cur->opState);
   if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
     return ret;
@@ -1751,6 +1759,7 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
   }
 
   // Parse use-list orders for v3+ if present.
+#ifndef MLIRBC_NO_USE_LIST_ORDERING
   // Store data in pending buffer, then call callback after op creation.
   if (parserState->version >= mbci_kUseListOrdering &&
       (encodingMask & kHasUseListOrders)) {
@@ -1801,6 +1810,37 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
       }
     }
   }
+#else
+  // Skip use-list orders entirely when disabled.
+  if (parserState->version >= mbci_kUseListOrdering &&
+      (encodingMask & kHasUseListOrders)) {
+    uint64_t numValuesToRead = 1;
+    if (numResults > 1) {
+      ret = mlirBytecodeParseVarInt(context, stream, &numValuesToRead);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+        return mlirBytecodeEmitError(context, "skipping use-list count");
+    }
+    for (uint64_t v = 0; v < numValuesToRead; ++v) {
+      if (numResults > 1) {
+        uint64_t resultIdx;
+        ret = mlirBytecodeParseVarInt(context, stream, &resultIdx);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+          return mlirBytecodeEmitError(context, "skipping use-list result index");
+      }
+      uint64_t numIndicesWithFlag;
+      ret = mlirBytecodeParseVarInt(context, stream, &numIndicesWithFlag);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+        return mlirBytecodeEmitError(context, "skipping use-list encoding");
+      uint64_t numIndices = numIndicesWithFlag >> 1;
+      for (uint64_t i = 0; i < numIndices; ++i) {
+        uint64_t index;
+        ret = mlirBytecodeParseVarInt(context, stream, &index);
+        if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+          return mlirBytecodeEmitError(context, "skipping use-list index");
+      }
+    }
+  }
+#endif
 
   if (encodingMask & kHasInlineRegions) {
     uint64_t numRegions = 0;
@@ -1826,6 +1866,7 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
   cur->op = opHandle;
 
   // Apply pending use-list orders now that the operation exists.
+#ifndef MLIRBC_NO_USE_LIST_ORDERING
   for (uint8_t i = 0; i < cur->numPendingUseListOrders; ++i) {
     uint64_t indices64[16];
     for (uint8_t j = 0; j < cur->pendingUseListOrders[i].numIndices; ++j)
@@ -1837,6 +1878,7 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
+#endif
 
   if (encodingMask & kHasInlineRegions) {
     // If the operation was lazily loaded, skip region processing.
@@ -2094,7 +2136,9 @@ MlirBytecodeStatus mlirBytecodeParseDeferredRegion(
   stack.data[0].numOpsRemaining = mbci_MlirIRSectionStackUnset;
   stack.data[0].isIsolatedFromAbove = 1;
   stack.data[0].isolatedStream = &stream;
+#ifndef MLIRBC_NO_USE_LIST_ORDERING
   stack.data[0].numPendingUseListOrders = 0;
+#endif
   
   // Parse using the standard IR parsing loop
   while (stack.data[0].numRegionsRemaining > 0 || stack.data[0].numBlocksRemaining > 0 || stack.data[0].numOpsRemaining > 0) {

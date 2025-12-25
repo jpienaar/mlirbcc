@@ -512,7 +512,7 @@ MlirBytecodeStatus mlirBytecodeQueryBuiltinIntegerTypeWidth(
 
 // ----
 
-static MlirBytecodeStatus mlirBytecodeAttributesPush(void *context,
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeAttributesPush(void *context,
                                                      MlirBytecodeSize total) {
   ParsingState *state = context;
   // Note: this currently assumes that number of state->attributes don't change.
@@ -530,7 +530,7 @@ static MlirBytecodeStatus mlirBytecodeAttributesPush(void *context,
   return mlirBytecodeSuccess();
 }
 
-static MlirBytecodeStatus
+MLIRBC_DEF MlirBytecodeStatus
 mlirBytecodeAssociateAttributeRange(void *context,
                                     MlirBytecodeAttrHandle attrHandle,
                                     MlirBytecodeDialectHandle dialectHandle,
@@ -542,7 +542,7 @@ mlirBytecodeAssociateAttributeRange(void *context,
   return mlirBytecodeSuccess();
 }
 
-static MlirBytecodeStatus mlirBytecodeTypesPush(void *context,
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeTypesPush(void *context,
                                                 MlirBytecodeSize total) {
   ParsingState *state = context;
   if (state->types) {
@@ -557,7 +557,7 @@ static MlirBytecodeStatus mlirBytecodeTypesPush(void *context,
   return mlirBytecodeSuccess();
 }
 
-static MlirBytecodeStatus
+MLIRBC_DEF MlirBytecodeStatus
 mlirBytecodeAssociateTypeRange(void *context, MlirBytecodeTypeHandle typeHandle,
                                MlirBytecodeDialectHandle dialectHandle,
                                MlirBytecodeBytesRef str, bool hasCustom) {
