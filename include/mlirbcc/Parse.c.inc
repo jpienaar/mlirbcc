@@ -792,8 +792,12 @@ MlirBytecodeStatus mlirBytecodeParseSignedVarInt(void *context,
 }
 
 // Align the current reader position to the specified alignment.
+// Per BytecodeFormat.md: "The input bytecode buffer must satisfy the same
+// alignment requirements as those of every section."
 static MlirBytecodeStatus
-mbci_alignTo(void *context, MlirBytecodeStream *stream, uint32_t alignment) {
+mbci_alignTo(void *context, MlirBytecodeStream *stream, uint32_t alignment,
+             int sectionID) {
+  (void)sectionID; // Used by caller for error reporting
   bool isPowerOf2 = (alignment != 0) && ((alignment & (alignment - 1)) == 0);
   if (MLIRBC_UNLIKELY(!isPowerOf2))
     return mlirBytecodeEmitError(context,
@@ -802,8 +806,9 @@ mbci_alignTo(void *context, MlirBytecodeStream *stream, uint32_t alignment) {
   // An arbitrary value used to fill alignment padding.
   const uint8_t kAlignmentByte = 0xCB;
 
-  // Shift the reader position to the next alignment boundary.
-  while ((uintptr_t)stream->pos & ((uintptr_t)alignment - 1)) {
+  // Skip the padding bytes. The bytecode writer adds padding relative to the
+  // file start to align sections. We need to consume those padding bytes.
+  while ((stream->pos - stream->start) & (alignment - 1)) {
     uint8_t padding;
     if (MLIRBC_UNLIKELY(mlirBytecodeFailed(
             mlirBytecodeParseByte(context, stream, &padding))))
@@ -815,11 +820,15 @@ mbci_alignTo(void *context, MlirBytecodeStream *stream, uint32_t alignment) {
     }
   }
 
-  if (MLIRBC_UNLIKELY((uint64_t)(stream->pos) % alignment != 0))
+  // Check that the absolute memory address is properly aligned.
+  // This is required for mmap compatibility - the buffer must be loaded at
+  // an aligned address so that aligned data can be accessed directly.
+  if (MLIRBC_UNLIKELY((uintptr_t)(stream->pos) % alignment != 0)) {
     return mlirBytecodeEmitError(
         context,
-        "expected data iterator aligned to %d, but got pointer '0x" PRIx64 "'",
-        alignment, (void *)stream->pos);
+        "expected section alignment %d but bytecode buffer not aligned",
+        alignment);
+  }
   return mlirBytecodeSuccess();
 }
 
@@ -851,9 +860,12 @@ mbci_parseSections(void *context, MlirBytecodeStream *stream,
     ret = mlirBytecodeParseVarInt(context, stream, &alignment);
     if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return ret;
-    ret = mbci_alignTo(context, stream, alignment);
-    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+    ret = mbci_alignTo(context, stream, alignment, sectionID);
+    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret))) {
+      // Emit secondary error about which section failed
+      mlirBytecodeEmitError(context, "failed to align section ID: %d", sectionID);
       return ret;
+    }
   }
 
   sectionData[sectionID].data = stream->pos;
@@ -1349,7 +1361,7 @@ mlirBytecodeParseResourceSection(void *context,
         if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
           return mlirBytecodeEmitError(context,
                                        "invalid/missing resource size");
-        ret = mbci_alignTo(context, &resPP, alignment);
+        ret = mbci_alignTo(context, &resPP, alignment, mbci_kResource);
         const uint8_t *start = resPP.pos;
         if (mlirBytecodeFailed(ret) ||
             mlirBytecodeFailed(mbci_skipBytes(context, &resPP, size)))
@@ -1575,6 +1587,12 @@ mbci_getStackWIP(mbci_MlirIRSectionStack *stack) {
   return &stack->data[stack->top + 1];
 }
 
+// Isolated stream access (no overflow).
+static MlirBytecodeStream *
+mbci_getIsolatedStream(mbci_MlirIRSectionStack *stack, int idx) {
+  return &stack->isolatedStreamStorage[idx];
+}
+
 static MlirBytecodeStatus
 mbci_mlirIRSectionStackPush(void *context, mbci_MlirIRSectionStack *stack) {
   if (MLIRBC_UNLIKELY(stack->top == MLIRBC_IR_STACK_MAX_DEPTH)) {
@@ -1743,38 +1761,45 @@ static MlirBytecodeStatus mbci_parseRegion(void *context,
   // For v2+ with isolated regions, parse the inline IR section first.
   // The isIsolatedFromAbove flag is set on the current stack top (the operation
   // with regions).
+  // The bytecode writer wraps all regions of an isolated operation in a single
+  // IR section. We only read the section header once (for the first region)
+  // while subsequent regions use the already-parsed isolated stream.
   if (parserState->version >= mbci_kLazyLoading && top->isIsolatedFromAbove) {
-    // Parse inline section header: section ID + length + data
-    uint8_t sectionId;
-    MlirBytecodeStatus ret = mlirBytecodeParseByte(context, stream, &sectionId);
-    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
-      return mlirBytecodeEmitError(context,
-                                   "unable to parse inline IR section id");
-    if (sectionId != mbci_kIR)
-      return mlirBytecodeEmitError(
-          context, "expected IR section for isolated region, got %d",
-          sectionId);
+    // Check if we already have an isolated stream from parsing a previous
+    // region of this same operation.
+    if (top->isolatedStream == NULL) {
+      // First region: parse the inline section header: section ID + length + data
+      uint8_t sectionId;
+      MlirBytecodeStatus ret = mlirBytecodeParseByte(context, stream, &sectionId);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+        return mlirBytecodeEmitError(context,
+                                     "unable to parse inline IR section id");
+      if (sectionId != mbci_kIR)
+        return mlirBytecodeEmitError(
+            context, "expected IR section for isolated region, got %d",
+            sectionId);
 
-    uint64_t sectionLength;
-    ret = mlirBytecodeParseVarInt(context, stream, &sectionLength);
-    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
-      return mlirBytecodeEmitError(context,
-                                   "unable to parse inline IR section length");
+      uint64_t sectionLength;
+      ret = mlirBytecodeParseVarInt(context, stream, &sectionLength);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+        return mlirBytecodeEmitError(context,
+                                     "unable to parse inline IR section length");
 
-    // Create a new stream for the isolated region's IR content.
-    const uint8_t *sectionData;
-    ret = mlirBytecodeParseBytes(context, stream, sectionLength, &sectionData);
-    if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
-      return mlirBytecodeEmitError(context,
-                                   "unable to parse inline IR section data");
+      // Create a new stream for the isolated region's IR content.
+      const uint8_t *sectionData;
+      ret = mlirBytecodeParseBytes(context, stream, sectionLength, &sectionData);
+      if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
+        return mlirBytecodeEmitError(context,
+                                     "unable to parse inline IR section data");
 
-    // Store the isolated region's stream in the stack entry.
-    // Use stack-local storage for thread-safety and reentrancy.
-    MlirBytecodeStream *isolatedStorage = mbci_getIsolatedStream(stack, stack->top);
-    isolatedStorage->pos = sectionData;
-    isolatedStorage->end = sectionData + sectionLength;
-    isolatedStorage->start = sectionData;
-    top->isolatedStream = isolatedStorage;
+      // Store the isolated region's stream in the stack entry.
+      // Use stack-local storage for thread-safety and reentrancy.
+      MlirBytecodeStream *isolatedStorage = mbci_getIsolatedStream(stack, stack->top);
+      isolatedStorage->pos = sectionData;
+      isolatedStorage->end = sectionData + sectionLength;
+      isolatedStorage->start = sectionData;
+      top->isolatedStream = isolatedStorage;
+    }
 
     // Now parse region content from the isolated stream.
     stream = top->isolatedStream;
