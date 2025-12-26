@@ -284,6 +284,11 @@ void *mlirBytecodeAllocateTemp(void *context, size_t bytes) { return NULL; }
 
 void mlirBytecodeFreeTemp(void *context, void *ptr) {}
 
+MLIRBC_DEF MlirBytecodeStatus mlirBytecodeEmitErrorImpl(void *context,
+                                                        const char *fmt, ...) {
+  return mlirBytecodeFailure();
+}
+
 #ifdef MLIRBC_STUB_REALISTIC
 #include <fcntl.h>
 #include <stdlib.h>
