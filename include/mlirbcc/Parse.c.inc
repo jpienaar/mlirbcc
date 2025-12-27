@@ -419,10 +419,6 @@ static MlirBytecodeStatus mlirBytecodeParseHandle(void *context,
                                                   MlirBytecodeStream *stream,
                                                   MlirBytecodeHandle *result);
 
-/// Skips the next n handles.
-static MlirBytecodeStatus
-mlirBytecodeSkipHandles(void *context, MlirBytecodeStream *stream, uint64_t n);
-
 /// Parse byte from stream.
 static MlirBytecodeStatus
 mlirBytecodeParseByte(void *context, MlirBytecodeStream *stream, uint8_t *val);
@@ -695,11 +691,6 @@ MlirBytecodeStatus mlirBytecodeParseHandle(void *context,
   return mlirBytecodeParseVarInt(context, stream, &result->id);
 }
 
-MlirBytecodeStatus
-mlirBytecodeSkipHandles(void *context, MlirBytecodeStream *stream, uint64_t n) {
-  return mbci_skipVarInts(context, stream, n);
-}
-
 MLIRBC_ATTRIBUTE_NOINLINE MlirBytecodeStatus mbci_parseVarInts(
     void *context, MlirBytecodeStream *stream, uint8_t head, uint64_t *result) {
 
@@ -903,7 +894,7 @@ mbci_getSection(const MlirBytecodeParserState *const file, int index) {
   return file->sectionData[index];
 }
 
-MlirBytecodeStatus
+static MlirBytecodeStatus
 mlirBytecodeForEachString(void *context,
                           const MlirBytecodeParserState *const parserState) {
   const MlirBytecodeBytesRef stringSection =
@@ -1888,8 +1879,10 @@ mbci_parseOperation(void *context, MlirBytecodeParserState *parserState,
     ret = mlirBytecodeParseVarInt(context, stream, &propertiesIdx);
     if (MLIRBC_UNLIKELY(mlirBytecodeFailed(ret)))
       return mlirBytecodeEmitError(context, "invalid properties index");
+    MlirBytecodeHandle propsHandle;
+    propsHandle.id = propertiesIdx;
     ret = mlirBytecodeOperationStateAddProperties(
-        context, cur->opState, (MlirBytecodeHandle){propertiesIdx});
+        context, cur->opState, propsHandle);
     if (MLIRBC_UNLIKELY(!mlirBytecodeSucceeded(ret)))
       return ret;
   }
@@ -2340,7 +2333,7 @@ MlirBytecodeStatus mlirBytecodeParse(void *context,
 #ifndef MLIRBC_NO_LAZY_LOADING
 /// Parse a deferred region from stored bytecode data.
 /// This is used for lazy loading materialization.
-MlirBytecodeStatus mlirBytecodeParseDeferredRegion(
+static MlirBytecodeStatus mlirBytecodeParseDeferredRegion(
     void *context, MlirBytecodeParserState *parserState,
     const uint8_t *regionData, uint64_t regionDataLength,
     MlirBytecodeOperationHandle opHandle) {
